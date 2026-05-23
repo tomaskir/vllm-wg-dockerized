@@ -1,0 +1,12 @@
+.env
+.env.*
+*.key
+*.priv
+priv
+pub
+wireproxy.conf
+*.swp
+.DS_Store
+.claude-home/
+claude/
+

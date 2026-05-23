@@ -1,0 +1,15 @@
+.git
+.gitignore
+.dockerignore
+.env
+.env.*
+*.key
+*.priv
+priv
+pub
+wireproxy.conf
+README.md
+CLAUDE.md
+.claude
+.claude-home
+claude
