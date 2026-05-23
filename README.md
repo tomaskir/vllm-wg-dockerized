@@ -33,6 +33,8 @@ Capture the generated `VLLM_API_KEY` from the container logs on first start. Oth
 
 `LISTEN_PORTS` is comma-separated; each port `N` becomes a wireproxy `[TCPServerTunnel]` with `ListenPort = N` and `Target = 127.0.0.1:N`. Use this to also expose SSH (`22`) or anything else you start inside the container.
 
+**Image tags.** `:v0.21.0` is a floating tag that points at the newest build of the v0.21.0 line. For reproducible deployments, pin to an immutable per-build tag like `:v0.21.0-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
+
 ## Env vars
 
 See [CLAUDE.md](./CLAUDE.md#configuration) for the full table. Minimum required:

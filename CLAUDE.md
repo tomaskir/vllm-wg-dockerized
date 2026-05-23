@@ -81,6 +81,7 @@ All via environment variables. No config files, no CLI flags beyond what the ent
 | `WG_KEEPALIVE` | no | `3` | `PersistentKeepalive` seconds |
 | `WG_MTU` | no | `1400` | netstack MTU |
 | `WG_PRESHARED_KEY` | no | — | optional PSK |
+| `WG_VERBOSE` | no | unset | any non-empty value runs wireproxy without `-s`, restoring its full verbose output (useful for handshake debugging). Default is silent. |
 
 ### SSH (required — sshd is always on)
 
@@ -110,7 +111,16 @@ docker build -t ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0 .
 docker push ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0
 ```
 
-Tag scheme: match the vLLM base image's version. When upgrading vLLM, bump the `FROM` line and rebuild with the same tag.
+Tag scheme: **`v<vllm-version>-<N>`**. The vLLM upstream version stays in the tag; `N` increments on every rebuild (log filter change, deps update, etc.).
+
+- Push a git tag like `v0.21.0-1`, `v0.21.0-2`, …
+- CI pushes three image tags per build:
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0-N` — **immutable** per-build artifact; pin here for reproducibility.
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0` — **floats** to the newest `-N` for that vLLM version.
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:latest` — **floats** to the newest tagged build overall.
+- When upgrading vLLM: bump the `FROM` line in the Dockerfile, then start `N` over at `1` under the new version (e.g. `v0.21.1-1`).
+
+Never overwrite an existing `-N` tag. If you need to roll back, push a new `-N` that reverts; don't force-push the old one.
 
 To upgrade wireproxy: bump `WIREPROXY_VERSION` and `WIREPROXY_SHA256` in the Dockerfile (both must change together — leaving one stale will either fail the checksum or silently fetch the old binary).
 

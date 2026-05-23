@@ -121,7 +121,13 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Starting wireproxy: WG ${WG_ADDRESS}, exposing ports ${PORTS[*]} (loopback targets)"
-wireproxy -c "$WIREPROXY_CONF" &
+# wireproxy only ships verbose (default) and silent (-s); no "info" level.
+# Default to silent; WG_VERBOSE restores full verbose output for handshake debugging.
+if [[ -n "${WG_VERBOSE:-}" ]]; then
+    wireproxy -c "$WIREPROXY_CONF" &
+else
+    wireproxy -s -c "$WIREPROXY_CONF" &
+fi
 pids[wireproxy]=$!
 
 echo "Starting sshd: 0.0.0.0:22 (pubkey auth only)"
