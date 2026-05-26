@@ -40,10 +40,11 @@ RUN apt-get update \
         openssl \
         openssh-server \
         ca-certificates \
+        python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130
-RUN pip install --no-cache-dir hf_transfer lm_eval
+RUN pip install --no-cache-dir hf_transfer lm_eval 'lm_eval[api]' inspect_ai inspect_evals
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 COPY --from=wireproxy-fetch /usr/local/bin/wireproxy /usr/local/bin/wireproxy
