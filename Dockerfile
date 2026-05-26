@@ -35,6 +35,10 @@ RUN apt-get update \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --no-cache-dir flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130
+RUN pip install --no-cache-dir hf_transfer
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+
 COPY --from=wireproxy-fetch /usr/local/bin/wireproxy /usr/local/bin/wireproxy
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
