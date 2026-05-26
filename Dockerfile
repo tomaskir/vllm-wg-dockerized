@@ -28,15 +28,22 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         wget \
         curl \
+        bc \
         jq \
         htop \
+        nvtop \
+        vim \
+        ncdu \
+        rsync \
+        tcpdump \
+        iputils-ping \
         openssl \
         openssh-server \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130
-RUN pip install --no-cache-dir hf_transfer
+RUN pip install --no-cache-dir hf_transfer lm_eval
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 COPY --from=wireproxy-fetch /usr/local/bin/wireproxy /usr/local/bin/wireproxy
