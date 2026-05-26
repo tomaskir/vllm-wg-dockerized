@@ -17,6 +17,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The vLLM base image (~10 GB extracted) plus flashinfer-jit-cache and
+      # lm_eval deps exceed the ~14 GB free on a default ubuntu-latest runner.
+      # Drop preinstalled toolchains we never use to reclaim ~20 GB.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+          df -h
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
