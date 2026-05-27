@@ -21,8 +21,18 @@ RUN curl -fsSL -o wireproxy.tar.gz \
 
 # --------------------------------------------------------------------
 # Stage 2: final image extending vLLM
+#
+# BASE_IMAGE selects the upstream vLLM runtime to extend:
+#   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
+#   - ROCm: vllm/vllm-openai-rocm:nightly-<sha>  (no semver tags exist yet;
+#          CI auto-resolves `nightly` to a digest and pins that)
+# ACCEL gates accelerator-specific installs. The only CUDA-only step today
+# is flashinfer-jit-cache, which is wheel-published for CUDA only.
 # --------------------------------------------------------------------
-FROM vllm/vllm-openai:v0.21.0
+ARG BASE_IMAGE=vllm/vllm-openai:v0.21.0
+FROM ${BASE_IMAGE}
+
+ARG ACCEL=cuda
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -44,7 +54,9 @@ RUN apt-get update \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130
+RUN if [ "$ACCEL" = "cuda" ]; then \
+        pip install --no-cache-dir flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130; \
+    fi
 RUN pip install --no-cache-dir hf_transfer lm_eval 'lm_eval[api]' inspect_ai inspect_evals
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 

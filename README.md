@@ -2,7 +2,12 @@
 
 This is an unprivileged GPU container running vLLM (typical on compute / GPU rental providers), exposed to a private WireGuard network - no `CAP_NET_ADMIN`, no kernel TUN.
 
-The image extends `vllm/vllm-openai:v0.21.0` and adds [wireproxy](https://github.com/windtf/wireproxy) to terminate WireGuard entirely in userspace. vLLM binds loopback only; the WG-side ingress is the explicit list of ports in `LISTEN_PORTS`, each forwarded to the same port on `127.0.0.1`. sshd also runs (always) and binds `0.0.0.0:22` so it's reachable via the platform's port-mapping as an out-of-band escape hatch.
+The image extends an upstream vLLM runtime image (CUDA or ROCm) and adds [wireproxy](https://github.com/windtf/wireproxy) to terminate WireGuard entirely in userspace. vLLM binds loopback only; the WG-side ingress is the explicit list of ports in `LISTEN_PORTS`, each forwarded to the same port on `127.0.0.1`. sshd also runs (always) and binds `0.0.0.0:22` so it's reachable via the platform's port-mapping as an out-of-band escape hatch.
+
+Two parallel image streams are published, one per accelerator:
+
+- **CUDA** — extends `vllm/vllm-openai:vX.Y.Z`. Tags: `latest-cuda`, `cuda-vX.Y.Z`, `cuda-vX.Y.Z-N`.
+- **ROCm** — extends `vllm/vllm-openai-rocm:nightly` (upstream does not yet publish semver-pinned ROCm runtime images). Tags: `latest-rocm`, `rocm-nightly-YYYYMMDD-N`. The exact upstream digest pinned by each build is recorded in the image's OCI labels.
 
 ## Quick start
 
@@ -22,7 +27,7 @@ docker run --gpus all --rm \
   -e LISTEN_PORTS="8000,22" \
   -e SSH_PUBLIC_KEY="$(cat ~/.ssh/id_ed25519.pub)" \
   -e VLLM_MODEL="meta-llama/Llama-3.1-8B-Instruct" \
-  ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0
+  ghcr.io/tomaskir/vllm-wg-dockerized:latest-cuda
 ```
 
 Usually the container would be launched by your compute / GPU rental provider's platform.
@@ -33,7 +38,7 @@ Capture the generated `VLLM_API_KEY` from the container logs on first start. Oth
 
 `LISTEN_PORTS` is comma-separated; each port `N` becomes a wireproxy `[TCPServerTunnel]` with `ListenPort = N` and `Target = 127.0.0.1:N`. Use this to also expose SSH (`22`) or anything else you start inside the container.
 
-**Image tags.** `:v0.21.0` is a floating tag that points at the newest build of the v0.21.0 line. For reproducible deployments, pin to an immutable per-build tag like `:v0.21.0-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
+**Image tags.** `:latest-cuda` / `:latest-rocm` float to the newest build of each accelerator. `:cuda-vX.Y.Z` floats to the newest build of that vLLM version on CUDA. For reproducible deployments, pin to an immutable per-build tag like `:cuda-v0.21.0-1` or `:rocm-nightly-20260527-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
 
 ## Env vars
 
@@ -45,7 +50,17 @@ See [CLAUDE.md](./CLAUDE.md#configuration) for the full table. Minimum required:
 ## Building
 
 ```bash
-docker build -t ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0 .
+# CUDA
+docker build \
+  --build-arg BASE_IMAGE=vllm/vllm-openai:v0.21.0 \
+  --build-arg ACCEL=cuda \
+  -t ghcr.io/tomaskir/vllm-wg-dockerized:cuda-v0.21.0-1 .
+
+# ROCm (pin to a specific nightly digest; `nightly` is a moving target)
+docker build \
+  --build-arg BASE_IMAGE=vllm/vllm-openai-rocm@sha256:<digest> \
+  --build-arg ACCEL=rocm \
+  -t ghcr.io/tomaskir/vllm-wg-dockerized:rocm-nightly-20260527-1 .
 ```
 
 ## Security

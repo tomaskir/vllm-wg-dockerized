@@ -4,7 +4,7 @@
 
 A Docker image, deployable on unprivileged GPU containers from compute / GPU rental providers, that runs **vLLM** and **sshd** locally and exposes selected ports to a **WireGuard** network — without requiring `CAP_NET_ADMIN` or a kernel TUN device.
 
-Built on top of `vllm/vllm-openai:v0.21.0`. Bundles `wireproxy` (userspace WireGuard via `wireguard-go` + gVisor netstack) to terminate WG entirely in user-mode. vLLM binds loopback only; the only ingress through WG is the set of ports listed in `LISTEN_PORTS`, each forwarded to `127.0.0.1:<same-port>`. sshd binds `0.0.0.0:22` to also be reachable via the platform's port-mapping (out-of-band escape hatch if WG breaks).
+Built on top of an upstream vLLM runtime image — either `vllm/vllm-openai:vX.Y.Z` (CUDA) or `vllm/vllm-openai-rocm:nightly-<sha>` (ROCm). The Dockerfile is parameterized via `ARG BASE_IMAGE` and `ARG ACCEL={cuda,rocm}`; CI builds both streams. Bundles `wireproxy` (userspace WireGuard via `wireguard-go` + gVisor netstack) to terminate WG entirely in user-mode. vLLM binds loopback only; the only ingress through WG is the set of ports listed in `LISTEN_PORTS`, each forwarded to `127.0.0.1:<same-port>`. sshd binds `0.0.0.0:22` to also be reachable via the platform's port-mapping (out-of-band escape hatch if WG breaks).
 
 ## Why This Exists
 
@@ -22,7 +22,7 @@ Compute / GPU rental providers typically rent unprivileged containers that grant
 - **NEVER enable SSH password authentication.** sshd is configured `PasswordAuthentication=no` + `PermitRootLogin=prohibit-password`. Pubkey only. If `SSH_PUBLIC_KEY` / `PUBLIC_KEY` is unset, the container must refuse to start.
 - **NEVER auto-add a prefix to `WG_ADDRESS`.** Refuse to start if the prefix is missing. Guessing `/32` would let a misconfigured address silently match too much.
 - **NEVER reuse a WG peer key across rentals.** Treat every container instance's key as single-use; revoke and rotate on teardown.
-- **NEVER use floating image tags.** Both the wireproxy release (`WIREPROXY_VERSION` + `WIREPROXY_SHA256`) and the vLLM base (`vllm/vllm-openai:vX.Y.Z`) are pinned. Always update both deliberately together.
+- **NEVER use floating image tags inside the Dockerfile.** The wireproxy release (`WIREPROXY_VERSION` + `WIREPROXY_SHA256`) is pinned. The vLLM base comes in via `ARG BASE_IMAGE` — CI always passes a fully-pinned reference (a semver tag for CUDA, a `@sha256:` digest for ROCm). The Dockerfile's default `BASE_IMAGE` exists only as a local-dev convenience; production tags must never inherit it.
 - **NEVER weaken key validation or skip the wireproxy SHA256 check.** A wrong key or a tampered binary fails silently — verify in CI.
 
 ### ALWAYS Do
@@ -30,7 +30,7 @@ Compute / GPU rental providers typically rent unprivileged containers that grant
 - **ALWAYS fail fast at startup on missing config.** The entrypoint must `exit 1` if any required env var is absent rather than starting a half-wired container.
 - **ALWAYS log to stdout/stderr only.** No log files; the orchestrator handles persistence.
 - **ALWAYS surface a generated `VLLM_API_KEY` loudly once at startup.** If we generated it, the operator needs to capture it from logs immediately.
-- **ALWAYS match the image tag to the underlying vLLM base tag** (e.g. `wg-vllm-bridge:v0.21.0` when extending `vllm/vllm-openai:v0.21.0`). Drift between bridge and vLLM versions makes debugging harder.
+- **ALWAYS encode the upstream vLLM base in our own tag.** For CUDA, the bridge tag carries the vLLM semver (`cuda-vX.Y.Z-N`) and CI derives `BASE_IMAGE` from it — they cannot drift. For ROCm, no semver-pinned runtime image exists upstream, so the bridge tag carries the build date (`rocm-nightly-YYYYMMDD-N`) and the resolved upstream digest is written into the image's OCI labels (`org.opencontainers.image.base.digest`). Drift between bridge and vLLM versions makes debugging harder.
 - **ALWAYS keep wireproxy, sshd, and vLLM lifecycled together.** If any supervised process dies, the container exits. A bridge without a model (or vice versa) is not a degraded state — it's a misconfiguration. The one exception is when `VLLM_MODEL` is unset by design (manual-start workflow), in which case vLLM is simply not part of the supervised set.
 - **ALWAYS force the WG-side and local-side ports to match.** Each `[TCPServerTunnel]` has `Target = 127.0.0.1:<same-port>`. Mixed mappings are not allowed; that's the deliberate constraint of the `LISTEN_PORTS` schema.
 
@@ -106,23 +106,34 @@ The env-var contract is the public API of this image. Renaming or removing a var
 
 ## Building
 
-```bash
-docker build -t ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0 .
-docker push ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0
-```
+Two parallel streams, one per accelerator. CI workflows live in `.github/workflows/build-cuda.yml` and `.github/workflows/build-rocm.yml` — each triggers on its own git tag prefix and pushes its own set of image tags.
 
-Tag scheme: **`v<vllm-version>-<N>`**. The vLLM upstream version stays in the tag; `N` increments on every rebuild (log filter change, deps update, etc.).
+### CUDA — tag scheme `cuda-v<vllm-version>-<N>`
 
-- Push a git tag like `v0.21.0-1`, `v0.21.0-2`, …
+- Push a git tag like `cuda-v0.21.0-1`, `cuda-v0.21.0-2`, …
+- CI derives `BASE_IMAGE=vllm/vllm-openai:vX.Y.Z` directly from the tag — they cannot drift.
 - CI pushes three image tags per build:
-  - `ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0-N` — **immutable** per-build artifact; pin here for reproducibility.
-  - `ghcr.io/tomaskir/vllm-wg-dockerized:v0.21.0` — **floats** to the newest `-N` for that vLLM version.
-  - `ghcr.io/tomaskir/vllm-wg-dockerized:latest` — **floats** to the newest tagged build overall.
-- When upgrading vLLM: bump the `FROM` line in the Dockerfile, then start `N` over at `1` under the new version (e.g. `v0.21.1-1`).
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z-N` — **immutable** per-build artifact; pin here for reproducibility.
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z` — **floats** to the newest `-N` for that vLLM version on CUDA.
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:latest-cuda` — **floats** to the newest CUDA build overall.
+- When upgrading vLLM: just push the new tag (`cuda-v0.21.1-1`). No Dockerfile change.
+
+### ROCm — tag scheme `rocm-nightly-<YYYYMMDD>-<N>`
+
+- Push a git tag like `rocm-nightly-20260527-1`, `rocm-nightly-20260527-2`, …
+- Upstream does not yet publish semver-pinned ROCm runtime images — only `vllm/vllm-openai-rocm:nightly` (a moving target). CI resolves `nightly` to a concrete digest at build time and pins via `BASE_IMAGE=vllm/vllm-openai-rocm@sha256:<digest>`, then writes that digest into the image's OCI labels (`org.opencontainers.image.base.digest`) so the build is reproducible at the artifact level and the upstream snapshot is traceable.
+- CI pushes two image tags per build:
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:rocm-nightly-YYYYMMDD-N` — **immutable** per-build artifact; pin here for reproducibility.
+  - `ghcr.io/tomaskir/vllm-wg-dockerized:latest-rocm` — **floats** to the newest ROCm build overall.
+- No per-version floating tag (the upstream has no version yet to float against).
+
+### Both streams
 
 Never overwrite an existing `-N` tag. If you need to roll back, push a new `-N` that reverts; don't force-push the old one.
 
-To upgrade wireproxy: bump `WIREPROXY_VERSION` and `WIREPROXY_SHA256` in the Dockerfile (both must change together — leaving one stale will either fail the checksum or silently fetch the old binary).
+To upgrade wireproxy: bump `WIREPROXY_VERSION` and `WIREPROXY_SHA256` in the Dockerfile (both must change together — leaving one stale will either fail the checksum or silently fetch the old binary). A wireproxy bump affects both streams; bump `-N` on both next time you tag.
+
+To upgrade the `vllm/vllm-openai-rocm` base for ROCm: nothing to change — every build re-resolves `nightly` to whatever digest is current. To freeze ROCm to a specific historical nightly, pass `BASE_IMAGE` explicitly to a local build instead of relying on CI's auto-resolution.
 
 ## Operational Context
 
