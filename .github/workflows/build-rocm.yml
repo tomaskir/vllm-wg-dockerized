@@ -59,6 +59,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # latest=false suppresses the action's default `:latest` tag; we publish
+          # accelerator-suffixed floaters (`:latest-cuda`, `:latest-rocm`) instead.
+          flavor: |
+            latest=false
           tags: |
             # Immutable per-build tag, taken verbatim from the git tag
             # (rocm-nightly-YYYYMMDD-N). The date is the day the build was

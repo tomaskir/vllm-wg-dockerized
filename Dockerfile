@@ -1,5 +1,14 @@
 # syntax=docker/dockerfile:1.7
 
+# Global ARG: must be declared before the first FROM so it's in scope for the
+# stage-2 `FROM ${BASE_IMAGE}`. ARGs declared between FROMs are stage-local
+# and cannot be referenced by a subsequent FROM line.
+# BASE_IMAGE selects the upstream vLLM runtime to extend:
+#   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
+#   - ROCm: vllm/vllm-openai-rocm:nightly-<sha>  (no semver tags exist yet;
+#          CI auto-resolves `nightly` to a digest and pins that)
+ARG BASE_IMAGE=vllm/vllm-openai:v0.21.0
+
 # --------------------------------------------------------------------
 # Stage 1: fetch wireproxy (pinned release + sha256 verification)
 # --------------------------------------------------------------------
@@ -20,16 +29,10 @@ RUN curl -fsSL -o wireproxy.tar.gz \
     && install -m 0755 wireproxy /usr/local/bin/wireproxy
 
 # --------------------------------------------------------------------
-# Stage 2: final image extending vLLM
-#
-# BASE_IMAGE selects the upstream vLLM runtime to extend:
-#   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
-#   - ROCm: vllm/vllm-openai-rocm:nightly-<sha>  (no semver tags exist yet;
-#          CI auto-resolves `nightly` to a digest and pins that)
+# Stage 2: final image extending vLLM.
 # ACCEL gates accelerator-specific installs. The only CUDA-only step today
 # is flashinfer-jit-cache, which is wheel-published for CUDA only.
 # --------------------------------------------------------------------
-ARG BASE_IMAGE=vllm/vllm-openai:v0.21.0
 FROM ${BASE_IMAGE}
 
 ARG ACCEL=cuda
