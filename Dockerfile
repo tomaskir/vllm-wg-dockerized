@@ -41,6 +41,7 @@ RUN apt-get update \
         openssh-server \
         ca-certificates \
         python-is-python3 \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130
