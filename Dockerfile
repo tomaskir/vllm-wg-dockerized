@@ -60,7 +60,7 @@ RUN apt-get update \
 RUN if [ "$ACCEL" = "cuda" ]; then \
         pip install --no-cache-dir flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130; \
     fi
-RUN pip install --no-cache-dir hf_transfer lm_eval 'lm_eval[api]' inspect_ai inspect_evals
+RUN pip install --no-cache-dir hf_transfer lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 COPY --from=wireproxy-fetch /usr/local/bin/wireproxy /usr/local/bin/wireproxy
