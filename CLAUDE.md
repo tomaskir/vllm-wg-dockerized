@@ -110,13 +110,13 @@ Two parallel streams, one per accelerator. CI workflows live in `.github/workflo
 
 ### CUDA — tag scheme `cuda-v<vllm-version>-<N>`
 
-- Push a git tag like `cuda-v0.21.0-1`, `cuda-v0.21.0-2`, …
+- Push a git tag like `cuda-v0.22.0-1`, `cuda-v0.22.0-2`, …
 - CI derives `BASE_IMAGE=vllm/vllm-openai:vX.Y.Z` directly from the tag — they cannot drift.
 - CI pushes three image tags per build:
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z-N` — **immutable** per-build artifact; pin here for reproducibility.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z` — **floats** to the newest `-N` for that vLLM version on CUDA.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:latest-cuda` — **floats** to the newest CUDA build overall.
-- When upgrading vLLM: just push the new tag (`cuda-v0.21.1-1`). No Dockerfile change.
+- When upgrading vLLM: just push the new tag (`cuda-v0.22.1-1`). No Dockerfile change.
 
 ### ROCm — tag scheme `rocm-nightly-<YYYYMMDD>-<N>`
 

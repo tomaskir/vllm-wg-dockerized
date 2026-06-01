@@ -7,7 +7,7 @@
 #   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
 #   - ROCm: vllm/vllm-openai-rocm:nightly-<sha>  (no semver tags exist yet;
 #          CI auto-resolves `nightly` to a digest and pins that)
-ARG BASE_IMAGE=vllm/vllm-openai:v0.21.0
+ARG BASE_IMAGE=vllm/vllm-openai:v0.22.0
 
 # --------------------------------------------------------------------
 # Stage 1: fetch wireproxy (pinned release + sha256 verification)
@@ -32,7 +32,7 @@ RUN curl -fsSL -o wireproxy.tar.gz \
 # Stage 2: final image extending vLLM.
 # ACCEL gates accelerator-specific installs. The CUDA-only step is the
 # flashinfer trio (python/cubin/jit-cache), wheel-published for CUDA only.
-# All three are pinned to 0.6.8.post1 to match vLLM 0.21.0's own pin of
+# All three are pinned to 0.6.11.post2 to match vLLM 0.22.0's own pin of
 # flashinfer-python/cubin: the jit-cache AOT kernels must match the runtime
 # flashinfer version, and an unpinned jit-cache would float ahead and drift.
 # python/cubin are already base deps (this is a no-op that documents intent);
@@ -65,8 +65,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if [ "$ACCEL" = "cuda" ]; then \
-        pip install --no-cache-dir flashinfer-python==0.6.8.post1 flashinfer-cubin==0.6.8.post1 \
-        && pip install --no-cache-dir flashinfer-jit-cache==0.6.8.post1 --index-url https://flashinfer.ai/whl/cu130; \
+        pip install --no-cache-dir flashinfer-python==0.6.11.post2 flashinfer-cubin==0.6.11.post2 \
+        && pip install --no-cache-dir flashinfer-jit-cache==0.6.11.post2 --index-url https://flashinfer.ai/whl/cu130; \
     fi
 RUN pip install --no-cache-dir hf_transfer lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor
 ENV HF_HUB_ENABLE_HF_TRANSFER=1

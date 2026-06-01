@@ -38,7 +38,7 @@ Capture the generated `VLLM_API_KEY` from the container logs on first start. Oth
 
 `LISTEN_PORTS` is comma-separated; each port `N` becomes a wireproxy `[TCPServerTunnel]` with `ListenPort = N` and `Target = 127.0.0.1:N`. Use this to also expose SSH (`22`) or anything else you start inside the container.
 
-**Image tags.** `:latest-cuda` / `:latest-rocm` float to the newest build of each accelerator. `:cuda-vX.Y.Z` floats to the newest build of that vLLM version on CUDA. For reproducible deployments, pin to an immutable per-build tag like `:cuda-v0.21.0-1` or `:rocm-nightly-20260527-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
+**Image tags.** `:latest-cuda` / `:latest-rocm` float to the newest build of each accelerator. `:cuda-vX.Y.Z` floats to the newest build of that vLLM version on CUDA. For reproducible deployments, pin to an immutable per-build tag like `:cuda-v0.22.0-1` or `:rocm-nightly-20260527-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
 
 ## Env vars
 
@@ -52,9 +52,9 @@ See [CLAUDE.md](./CLAUDE.md#configuration) for the full table. Minimum required:
 ```bash
 # CUDA
 docker build \
-  --build-arg BASE_IMAGE=vllm/vllm-openai:v0.21.0 \
+  --build-arg BASE_IMAGE=vllm/vllm-openai:v0.22.0 \
   --build-arg ACCEL=cuda \
-  -t ghcr.io/tomaskir/vllm-wg-dockerized:cuda-v0.21.0-1 .
+  -t ghcr.io/tomaskir/vllm-wg-dockerized:cuda-v0.22.0-1 .
 
 # ROCm (pin to a specific nightly digest; `nightly` is a moving target)
 docker build \
