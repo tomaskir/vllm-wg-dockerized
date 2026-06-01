@@ -5,8 +5,7 @@
 # and cannot be referenced by a subsequent FROM line.
 # BASE_IMAGE selects the upstream vLLM runtime to extend:
 #   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
-#   - ROCm: vllm/vllm-openai-rocm:nightly-<sha>  (no semver tags exist yet;
-#          CI auto-resolves `nightly` to a digest and pins that)
+#   - ROCm: vllm/vllm-openai-rocm:vX.Y.Z         (pin to a semver tag)
 ARG BASE_IMAGE=vllm/vllm-openai:v0.22.0
 
 # --------------------------------------------------------------------

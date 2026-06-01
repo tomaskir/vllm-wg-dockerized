@@ -7,7 +7,7 @@ The image extends an upstream vLLM runtime image (CUDA or ROCm) and adds [wirepr
 Two parallel image streams are published, one per accelerator:
 
 - **CUDA** — extends `vllm/vllm-openai:vX.Y.Z`. Tags: `latest-cuda`, `cuda-vX.Y.Z`, `cuda-vX.Y.Z-N`.
-- **ROCm** — extends `vllm/vllm-openai-rocm:nightly` (upstream does not yet publish semver-pinned ROCm runtime images). Tags: `latest-rocm`, `rocm-nightly-YYYYMMDD-N`. The exact upstream digest pinned by each build is recorded in the image's OCI labels.
+- **ROCm** — extends `vllm/vllm-openai-rocm:vX.Y.Z`. Tags: `latest-rocm`, `rocm-vX.Y.Z`, `rocm-vX.Y.Z-N`.
 
 ## Quick start
 
@@ -38,7 +38,7 @@ Capture the generated `VLLM_API_KEY` from the container logs on first start. Oth
 
 `LISTEN_PORTS` is comma-separated; each port `N` becomes a wireproxy `[TCPServerTunnel]` with `ListenPort = N` and `Target = 127.0.0.1:N`. Use this to also expose SSH (`22`) or anything else you start inside the container.
 
-**Image tags.** `:latest-cuda` / `:latest-rocm` float to the newest build of each accelerator. `:cuda-vX.Y.Z` floats to the newest build of that vLLM version on CUDA. For reproducible deployments, pin to an immutable per-build tag like `:cuda-v0.22.0-1` or `:rocm-nightly-20260527-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
+**Image tags.** `:latest-cuda` / `:latest-rocm` float to the newest build of each accelerator. `:cuda-vX.Y.Z` floats to the newest build of that vLLM version on CUDA. For reproducible deployments, pin to an immutable per-build tag like `:cuda-v0.22.0-1` or `:rocm-v0.22.0-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
 
 ## Env vars
 
@@ -56,11 +56,11 @@ docker build \
   --build-arg ACCEL=cuda \
   -t ghcr.io/tomaskir/vllm-wg-dockerized:cuda-v0.22.0-1 .
 
-# ROCm (pin to a specific nightly digest; `nightly` is a moving target)
+# ROCm
 docker build \
-  --build-arg BASE_IMAGE=vllm/vllm-openai-rocm@sha256:<digest> \
+  --build-arg BASE_IMAGE=vllm/vllm-openai-rocm:v0.22.0 \
   --build-arg ACCEL=rocm \
-  -t ghcr.io/tomaskir/vllm-wg-dockerized:rocm-nightly-20260527-1 .
+  -t ghcr.io/tomaskir/vllm-wg-dockerized:rocm-v0.22.0-1 .
 ```
 
 ## Security

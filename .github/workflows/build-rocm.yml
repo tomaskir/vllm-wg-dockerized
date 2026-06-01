@@ -3,7 +3,7 @@ name: build-rocm
 on:
   push:
     tags:
-      - 'rocm-nightly-*'
+      - 'rocm-v*'
   workflow_dispatch:
 
 permissions:
@@ -26,26 +26,23 @@ jobs:
           sudo docker image prune --all --force
           df -h
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Upstream vLLM does not yet publish semver-pinned ROCm runtime images
-      # (only nightlies). Pin to the digest the `nightly` tag points to right
-      # now so the build is reproducible, and surface that digest in image
-      # labels so consumers can trace back to the exact upstream nightly.
-      - name: Resolve ROCm nightly to digest
+      # Tag scheme: rocm-vX.Y.Z-N. The vLLM upstream version is embedded in the
+      # git tag and used to derive the BASE_IMAGE so the two can't drift.
+      - name: Derive vLLM base image from tag
         id: base
         run: |
-          nightly_ref="vllm/vllm-openai-rocm:nightly"
-          digest=$(docker buildx imagetools inspect "$nightly_ref" \
-                   --format '{{ .Manifest.Digest }}')
-          if [ -z "$digest" ]; then
-            echo "::error::failed to resolve $nightly_ref to a digest"
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^rocm-(v[0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$ ]]; then
+            echo "::error::tag '$tag' must look like rocm-vX.Y.Z-N (e.g. rocm-v0.22.0-1)"
             exit 1
           fi
-          echo "Resolved $nightly_ref -> $digest"
-          echo "base_image=vllm/vllm-openai-rocm@${digest}" >>"$GITHUB_OUTPUT"
-          echo "base_digest=${digest}" >>"$GITHUB_OUTPUT"
+          vllm_version="${BASH_REMATCH[1]}"
+          base_image="vllm/vllm-openai-rocm:${vllm_version}"
+          echo "base_image=${base_image}" >>"$GITHUB_OUTPUT"
+          echo "Resolved base image: ${base_image}"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -64,15 +61,12 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            # Immutable per-build tag, taken verbatim from the git tag
-            # (rocm-nightly-YYYYMMDD-N). The date is the day the build was
-            # tagged; the actual upstream digest is in the image labels.
+            # Immutable per-build tag, taken verbatim from the git tag (rocm-vX.Y.Z-N)
             type=ref,event=tag
-            # Floating overall-latest ROCm tag
-            type=raw,value=latest-rocm,enable=${{ startsWith(github.ref, 'refs/tags/rocm-nightly-') }}
-          labels: |
-            org.opencontainers.image.base.name=vllm/vllm-openai-rocm:nightly
-            org.opencontainers.image.base.digest=${{ steps.base.outputs.base_digest }}
+            # Floating per-vLLM-version tag: rocm-vX.Y.Z-N -> rocm-vX.Y.Z
+            type=match,pattern=(rocm-v\d+\.\d+\.\d+)-\d+,group=1
+            # Floating overall-latest ROCm tag, only on properly-formatted release tags
+            type=raw,value=latest-rocm,enable=${{ startsWith(github.ref, 'refs/tags/rocm-v') }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
