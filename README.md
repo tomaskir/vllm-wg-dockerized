@@ -47,6 +47,8 @@ See [CLAUDE.md](./CLAUDE.md#configuration) for the full table. Minimum required:
 - `WG_PRIVATE_KEY`, `WG_PEER_PUBLIC_KEY`, `WG_ENDPOINT`, `WG_ADDRESS`, `LISTEN_PORTS`
 - `SSH_PUBLIC_KEY` (or the alias `PUBLIC_KEY`, for compatibility with provider conventions that use that name)
 
+Optional: `VLLM_MODEL` to auto-start serving, and `HF_TOKEN` if the model is gated or private (e.g. Llama). Both are passed at container start; never commit them.
+
 ## Building
 
 ```bash

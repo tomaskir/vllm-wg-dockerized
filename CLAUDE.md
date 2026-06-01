@@ -99,6 +99,7 @@ All via environment variables. No config files, no CLI flags beyond what the ent
 | `VLLM_MODEL` | no | — | if set, container auto-starts `vllm serve <model>` |
 | `VLLM_API_KEY` | no | generated | if unset, generated via `openssl rand -hex 32` and logged once |
 | `VLLM_EXTRA_ARGS` | no | — | extra args passed verbatim to `vllm serve` (word-split) |
+| `HF_TOKEN` | no | — | HuggingFace token for **gated/private** model downloads (e.g. Llama). Operator-supplied at container start, never baked in; auto-consumed by vLLM/`huggingface_hub`. Not needed for public models. |
 
 If `VLLM_MODEL` is unset, only wireproxy + sshd run and vLLM must be started manually (e.g. via SSH) on `127.0.0.1:8000`.
 
