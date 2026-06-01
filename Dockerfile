@@ -67,8 +67,11 @@ RUN if [ "$ACCEL" = "cuda" ]; then \
         pip install --no-cache-dir flashinfer-python==0.6.11.post2 flashinfer-cubin==0.6.11.post2 \
         && pip install --no-cache-dir flashinfer-jit-cache==0.6.11.post2 --index-url https://flashinfer.ai/whl/cu130; \
     fi
-RUN pip install --no-cache-dir hf_transfer lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
+RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor
+# HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
+# huggingface_hub auto-installs the hf-xet backend. HF_XET_HIGH_PERFORMANCE is
+# the Xet equivalent of the old HF_HUB_ENABLE_HF_TRANSFER=1 fast-transfer flag.
+ENV HF_XET_HIGH_PERFORMANCE=1
 
 COPY --from=wireproxy-fetch /usr/local/bin/wireproxy /usr/local/bin/wireproxy
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
