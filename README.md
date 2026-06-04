@@ -65,6 +65,8 @@ docker build \
   -t ghcr.io/tomaskir/vllm-wg-dockerized:rocm-v0.22.0-1 .
 ```
 
+To build against an **unreleased vLLM dev commit** (a fix not yet in any release), overlay a pinned per-commit wheel via `VLLM_WHEEL_URL` / `VLLM_WHEEL_SHA256` (+ `FLASHINFER_VERSION`) — locally, or in CI via the manual `build-dev-commit` GitHub Actions workflow. See [CLAUDE.md](./CLAUDE.md#building-against-an-unreleased-vllm-dev-commit) for the coherence checks and a worked example.
+
 ## Security
 
 - WG private keys and API keys are env-var only. Never commit.

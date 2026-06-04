@@ -137,6 +137,47 @@ To upgrade wireproxy: bump `WIREPROXY_VERSION` and `WIREPROXY_SHA256` in the Doc
 
 To build ROCm against an unreleased upstream snapshot (e.g. a specific `vllm/vllm-openai-rocm:nightly` digest) rather than a semver release, pass `BASE_IMAGE` explicitly to a local build; CI only builds from `rocm-vX.Y.Z` release tags.
 
+### Building against an unreleased vLLM dev commit
+
+Sometimes a fix lands in vLLM `main` before any release tag (or its image) exists. There is no `vllm/vllm-openai` image for an arbitrary commit — upstream prunes its per-commit `nightly-<sha>` images quickly — but the per-commit **wheel** stays available at `https://wheels.vllm.ai/<full-sha>/`. The bridge can overlay that pinned wheel onto the nearest released base via three build args:
+
+- `VLLM_WHEEL_URL` — the immutable per-commit wheel URL.
+- `VLLM_WHEEL_SHA256` — its checksum. Both must be set together; the build fails on a partial/unpinned config, same as the wireproxy gate. The wheel is installed `--no-deps`, so the base's compiled stack (torch, xformers) is left untouched.
+- `FLASHINFER_VERSION` — set to the commit's flashinfer pin (vLLM's `docker/Dockerfile` `ARG FLASHINFER_VERSION` / `versions.json`) so the jit-cache AOT kernels match.
+
+**Before using it, confirm the overlay is coherent** — diff the target commit against the chosen base:
+
+- `torch`/`torchvision`/`torchaudio` in `requirements/cuda.txt` **must be unchanged** (a `--no-deps` overlay keeps the base's torch). If they moved, do **not** overlay — build vLLM's official `vllm-openai` image at the commit instead (`git checkout <sha>`, `docker build -f docker/Dockerfile --target vllm-openai --build-arg VLLM_USE_PRECOMPILED=1 …`) and point `BASE_IMAGE` at that.
+- `flashinfer` pin — set `FLASHINFER_VERSION` to match it.
+
+The build runs `pip check` after the overlay; a failure means the dev commit pulled deps the base can't satisfy (i.e. the overlay isn't coherent) — fall back to the from-source base above.
+
+This is a **local/manual build only** — CI builds from release tags. Mirror the result to your registry and pin downstream by `@sha256:` digest; the upstream wheel will eventually be pruned too. Tag it so it reads as a dev build, not a release (don't reuse the `cuda-vX.Y.Z-N` scheme).
+
+Worked example — commit `a6183563b` (vLLM `0.22.1rc1.dev164`; `torch` unchanged from v0.22.0, flashinfer `0.6.11.post2` → `0.6.12`):
+
+```bash
+docker build \
+  --build-arg BASE_IMAGE=vllm/vllm-openai:v0.22.0 \
+  --build-arg ACCEL=cuda \
+  --build-arg FLASHINFER_VERSION=0.6.12 \
+  --build-arg VLLM_WHEEL_URL="https://wheels.vllm.ai/a6183563b6f604ef7b481ce8ce7af359c6dc1b74/vllm-0.22.1rc1.dev164%2Bga6183563b-cp38-abi3-manylinux_2_28_x86_64.whl" \
+  --build-arg VLLM_WHEEL_SHA256=0a0e7ad163a67d011cc838569c8dbbfe3377ec558a60c534bfad200e60aa75f4 \
+  -t ghcr.io/tomaskir/vllm-wg-dockerized:cuda-0.22.1rc1.dev164-ga6183563b-1 .
+```
+
+**In CI:** the `build-dev-commit` workflow (`.github/workflows/build-dev-commit.yml`) runs the same overlay on a GitHub runner and pushes to GHCR. It is `workflow_dispatch`-only — dev builds are never tag-triggered — and publishes **only** the single immutable dev tag you pass, never the `latest-cuda` / `cuda-vX.Y.Z` floaters; it also refuses a tag that looks like a release. Trigger it from the Actions tab, or:
+
+```bash
+gh workflow run build-dev-commit.yml \
+  -f accel=cuda \
+  -f base_image=vllm/vllm-openai:v0.22.0 \
+  -f flashinfer_version=0.6.12 \
+  -f vllm_wheel_url="https://wheels.vllm.ai/a6183563b6f604ef7b481ce8ce7af359c6dc1b74/vllm-0.22.1rc1.dev164%2Bga6183563b-cp38-abi3-manylinux_2_28_x86_64.whl" \
+  -f vllm_wheel_sha256=0a0e7ad163a67d011cc838569c8dbbfe3377ec558a60c534bfad200e60aa75f4 \
+  -f image_tag=cuda-0.22.1rc1.dev164-ga6183563b-1
+```
+
 ## Operational Context
 
 Typical flow on a compute / GPU rental provider:
