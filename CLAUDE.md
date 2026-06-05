@@ -117,7 +117,7 @@ Two parallel streams, one per accelerator. CI workflows live in `.github/workflo
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z-N` — **immutable** per-build artifact; pin here for reproducibility.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z` — **floats** to the newest `-N` for that vLLM version on CUDA.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:latest-cuda` — **floats** to the newest CUDA build overall.
-- When upgrading vLLM: just push the new tag (`cuda-v0.22.1-1`). No Dockerfile change.
+- When upgrading vLLM: push the new tag (`cuda-v0.22.1-1`). Usually no Dockerfile change — but if the new vLLM moved its flashinfer pin (e.g. 0.22.0 → 0.22.1 bumped flashinfer `0.6.11.post2` → `0.6.12`), bump the `FLASHINFER_VERSION` default in the Dockerfile to match. It is not auto-derived from the tag, and the flashinfer trio is installed `--no-deps`, so a stale default silently drifts from the base.
 
 ### ROCm — tag scheme `rocm-v<vllm-version>-<N>`
 

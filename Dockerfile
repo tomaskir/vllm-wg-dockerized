@@ -39,10 +39,13 @@ RUN curl -fsSL -o wireproxy.tar.gz \
 FROM ${BASE_IMAGE}
 
 ARG ACCEL=cuda
-# Defaults to the v0.22.0 base's flashinfer pin. When overlaying a dev-commit
-# wheel (VLLM_WHEEL_URL below), set this to that commit's pin — vLLM's
-# docker/Dockerfile `ARG FLASHINFER_VERSION` / versions.json — so the jit-cache
-# AOT kernels match the runtime flashinfer the wheel was built against.
+# The flashinfer version for BOTH stable and dev-overlay CUDA builds. Default =
+# the v0.22.0 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
+# the vLLM base for a release, re-check vLLM's flashinfer pin (its
+# docker/Dockerfile `ARG FLASHINFER_VERSION` / versions.json) and update this
+# default if it moved, or the trio drifts from the base (e.g. 0.22.1 moved it to
+# 0.6.12). When overlaying a dev-commit wheel (VLLM_WHEEL_URL below), pass the
+# commit's pin as a build-arg instead. jit-cache AOT kernels must match runtime.
 ARG FLASHINFER_VERSION=0.6.11.post2
 
 RUN apt-get update \
