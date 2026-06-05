@@ -66,14 +66,17 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # flashinfer trio (CUDA only), wheel-published for CUDA only. python/cubin are
-# already base deps (no-op that documents intent); jit-cache is the heavy ~1.8GB
-# add and is NOT a default dep. Version is FLASHINFER_VERSION (above) so it can
-# track a dev-commit wheel's flashinfer pin; the jit-cache AOT kernels must
-# match the runtime flashinfer or they drift. Installed before the vLLM overlay
-# so a --no-deps wheel install lands on the intended flashinfer.
+# already base deps; jit-cache is the heavy ~1.8GB AOT-kernel add and is NOT a
+# default dep. Version is FLASHINFER_VERSION (above) so it can track a dev-commit
+# wheel's flashinfer pin; the jit-cache kernels must match the runtime flashinfer
+# or they drift. --no-deps is REQUIRED: a flashinfer version bump otherwise
+# re-resolves its dependency closure and drags in a conflicting torch (e.g. 0.6.12
+# pulls torch 2.9.1 + cuda-toolkit, clobbering the base's 2.11.0+cu130). We keep
+# the base's torch and only swap the flashinfer packages. Runs before the vLLM
+# overlay so a --no-deps wheel install lands on the intended flashinfer.
 RUN if [ "$ACCEL" = "cuda" ]; then \
-        pip install --no-cache-dir flashinfer-python==${FLASHINFER_VERSION} flashinfer-cubin==${FLASHINFER_VERSION} \
-        && pip install --no-cache-dir flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/cu130; \
+        pip install --no-cache-dir --no-deps flashinfer-python==${FLASHINFER_VERSION} flashinfer-cubin==${FLASHINFER_VERSION} \
+        && pip install --no-cache-dir --no-deps flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/cu130; \
     fi
 
 # Optional: pin vLLM to a specific upstream dev commit that has no released
@@ -85,16 +88,20 @@ RUN if [ "$ACCEL" = "cuda" ]; then \
 # torch/xformers stack and the flashinfer pinned above are preserved: only
 # coherent when the target commit shares the base's torch pin (verify) and
 # FLASHINFER_VERSION matches the commit's pin. Unset for release builds — no-op.
+# The wheel is saved under its REAL filename (decoding %2B -> +): pip derives the
+# package/version from the filename, so a generic /tmp/vllm.whl is rejected as a
+# malformed wheel name.
 ARG VLLM_WHEEL_URL=""
 ARG VLLM_WHEEL_SHA256=""
 RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
         if [ -z "$VLLM_WHEEL_URL" ] || [ -z "$VLLM_WHEEL_SHA256" ]; then \
             echo "ERROR: set BOTH VLLM_WHEEL_URL and VLLM_WHEEL_SHA256, or neither" >&2; exit 1; \
         fi; \
-        curl -fSL -o /tmp/vllm.whl "$VLLM_WHEEL_URL" \
-        && echo "${VLLM_WHEEL_SHA256}  /tmp/vllm.whl" | sha256sum -c - \
-        && pip install --no-cache-dir --no-deps /tmp/vllm.whl \
-        && rm -f /tmp/vllm.whl \
+        whl="/tmp/$(basename "$VLLM_WHEEL_URL" | sed 's/%2[bB]/+/g')" \
+        && curl -fSL -o "$whl" "$VLLM_WHEEL_URL" \
+        && echo "${VLLM_WHEEL_SHA256}  ${whl}" | sha256sum -c - \
+        && pip install --no-cache-dir --no-deps "$whl" \
+        && rm -f "$whl" \
         && pip check \
         && python -c "import importlib.metadata as m; print('vLLM pinned to', m.version('vllm'))"; \
     fi
