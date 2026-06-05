@@ -90,7 +90,10 @@ RUN if [ "$ACCEL" = "cuda" ]; then \
 # FLASHINFER_VERSION matches the commit's pin. Unset for release builds — no-op.
 # The wheel is saved under its REAL filename (decoding %2B -> +): pip derives the
 # package/version from the filename, so a generic /tmp/vllm.whl is rejected as a
-# malformed wheel name.
+# malformed wheel name. The post-install gate runs `pip check` but only fails on
+# conflicts naming the vLLM stack (torch/vllm/flashinfer/xformers) — the base
+# image carries unrelated pre-existing pip-check warts (e.g. pygobject/pycairo)
+# we must not trip over.
 ARG VLLM_WHEEL_URL=""
 ARG VLLM_WHEEL_SHA256=""
 RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
@@ -102,7 +105,10 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
         && echo "${VLLM_WHEEL_SHA256}  ${whl}" | sha256sum -c - \
         && pip install --no-cache-dir --no-deps "$whl" \
         && rm -f "$whl" \
-        && pip check \
+        && pc="$(pip check 2>&1 || true)" && echo "$pc" \
+        && { echo "$pc" | grep -qiE '(torch|vllm|flashinfer|xformers)' \
+                && { echo "ERROR: pip check flagged a conflict in the vLLM stack (above)"; exit 1; } \
+                || true; } \
         && python -c "import importlib.metadata as m; print('vLLM pinned to', m.version('vllm'))"; \
     fi
 RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor
