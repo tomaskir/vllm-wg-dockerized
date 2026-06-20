@@ -19,7 +19,7 @@ on:
       base_image:
         description: Released vLLM base to overlay onto (must share the commit's torch pin)
         required: true
-        default: vllm/vllm-openai:v0.22.0
+        default: vllm/vllm-openai:v0.23.0
       vllm_wheel_url:
         description: Immutable per-commit wheel URL (https://wheels.vllm.ai/<full-sha>/...whl)
         required: true
@@ -29,7 +29,7 @@ on:
       flashinfer_version:
         description: flashinfer pin for the commit (vLLM docker/Dockerfile ARG FLASHINFER_VERSION)
         required: true
-        default: 0.6.11.post2
+        default: 0.6.12
       image_tag:
         description: Immutable dev tag, e.g. cuda-0.22.1rc1.dev164-ga6183563b-1 (must NOT look like a release tag)
         required: true
