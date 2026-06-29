@@ -6,7 +6,7 @@
 # BASE_IMAGE selects the upstream vLLM runtime to extend:
 #   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
 #   - ROCm: vllm/vllm-openai-rocm:vX.Y.Z         (pin to a semver tag)
-ARG BASE_IMAGE=vllm/vllm-openai:v0.23.0
+ARG BASE_IMAGE=vllm/vllm-openai:v0.24.0
 
 # --------------------------------------------------------------------
 # Stage 1: fetch wireproxy (pinned release + sha256 verification)
@@ -31,7 +31,7 @@ RUN curl -fsSL -o wireproxy.tar.gz \
 # Stage 2: final image extending vLLM.
 # ACCEL gates accelerator-specific installs (the CUDA-only flashinfer trio).
 # Two knobs make dev/unreleased vLLM builds first-class without editing this
-# file: FLASHINFER_VERSION (defaults to the v0.23.0 base's pin) and the
+# file: FLASHINFER_VERSION (defaults to the v0.24.0 base's pin) and the
 # VLLM_WHEEL_URL / VLLM_WHEEL_SHA256 pair, which overlays a pinned per-commit
 # wheel from wheels.vllm.ai over the base. See "Building against an unreleased
 # vLLM dev commit" in CLAUDE.md.
@@ -40,11 +40,12 @@ FROM ${BASE_IMAGE}
 
 ARG ACCEL=cuda
 # The flashinfer version for BOTH stable and dev-overlay CUDA builds. Default =
-# the v0.23.0 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
+# the v0.24.0 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
 # the vLLM base for a release, re-check vLLM's flashinfer pin (its
 # docker/Dockerfile `ARG FLASHINFER_VERSION` / versions.json) and update this
 # default if it moved, or the trio drifts from the base (e.g. 0.22.0 -> 0.23.0
-# moved it 0.6.11.post2 -> 0.6.12). When overlaying a dev-commit wheel
+# moved it 0.6.11.post2 -> 0.6.12; 0.23.0 -> 0.24.0 left it at 0.6.12). When
+# overlaying a dev-commit wheel
 # (VLLM_WHEEL_URL below), pass the commit's pin as a build-arg instead. jit-cache
 # AOT kernels must match runtime.
 ARG FLASHINFER_VERSION=0.6.12
