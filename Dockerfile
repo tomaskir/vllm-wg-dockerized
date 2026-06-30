@@ -139,6 +139,31 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
                 || true; } \
         && python -c "import importlib.metadata as m; print('vLLM pinned to', m.version('vllm'))"; \
     fi
+
+# vLLM source patch (BOTH streams): fix the torch.compile Dynamo break in vLLM's
+# vendored flash-linear-attention `input_guard` on torch 2.11. The vendored FLA
+# wraps ops with `torch.accelerator.device_index()`, whose __init__ is on torch
+# 2.11's Dynamo skiplist, so vLLM's AOT full-graph compile of GDN / linear-
+# attention backbones (Qwen3-Next, gated-delta-net, ...) crashes with "Attempted
+# to inline function marked as skipped". Cherry-pick of the still-open, conflict-
+# stalled upstream fix (vLLM PR #40921 / issue #40919; torch pytorch/pytorch#181540):
+# route the device guard through torch.cuda.device(), which Dynamo CAN trace. Not
+# ACCEL-gated — the bug hits CUDA and ROCm alike (ROCm tensors report
+# device.type=='cuda', so they take the same traceable branch). Runs AFTER the
+# optional dev-wheel overlay so an overlaid vLLM is patched too. Plain `git apply`
+# (no --3way/--forward) makes the build FAIL LOUDLY if a future base refactors or
+# upstream-merges this — the signal to delete this patch on the next vLLM bump.
+COPY patches/vllm-fla-input-guard-dynamo.patch /tmp/vllm-fla-input-guard-dynamo.patch
+RUN sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm.__file__)))')" \
+    && git -C "$sp" apply --verbose -p1 /tmp/vllm-fla-input-guard-dynamo.patch \
+    && rm -f /tmp/vllm-fla-input-guard-dynamo.patch \
+    && python -m py_compile \
+        "$sp/vllm/platforms/interface.py" \
+        "$sp/vllm/model_executor/layers/fla/ops/utils.py" \
+    && grep -q 'get_device_context(tensor.device)' \
+        "$sp/vllm/model_executor/layers/fla/ops/utils.py" \
+    && echo "vLLM FLA input_guard torch.compile patch applied"
+
 RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor
 # HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
 # huggingface_hub auto-installs the hf-xet backend. HF_XET_HIGH_PERFORMANCE is
