@@ -84,6 +84,19 @@ RUN if [ "$ACCEL" = "cuda" ]; then \
         && pip install --no-cache-dir --no-deps flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/cu130; \
     fi
 
+# amd-quark (ROCm only): AMD's Quark quantization runtime. vLLM refuses to load
+# MX-FP4 / Quark-quantized models without it ("The package `amd-quark` is required
+# to use MX-FP4 models.") and lists `amd-quark>=0.8.99` in requirements/rocm.txt,
+# but the published vllm-openai-rocm image does NOT bake it in — so we add it.
+# Pure-python wheel (py3-none-any) with no torch dep, so unlike the flashinfer
+# trio it cannot disturb the base's ROCm torch; installed WITH deps (its only
+# heavy constraint is numpy<=2.1.3, which matches vLLM's own ROCm resolution).
+# Pinned for reproducibility. Gated to ROCm: CUDA uses the flashinfer quant paths.
+ARG QUARK_VERSION=0.11.2
+RUN if [ "$ACCEL" = "rocm" ]; then \
+        pip install --no-cache-dir amd-quark==${QUARK_VERSION}; \
+    fi
+
 # Optional: pin vLLM to a specific upstream dev commit that has no released
 # image yet (e.g. a fix that landed after the last vLLM tag). Point
 # VLLM_WHEEL_URL at the immutable per-commit wheel from
