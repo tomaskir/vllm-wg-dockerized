@@ -89,10 +89,20 @@ RUN if [ "$ACCEL" = "cuda" ]; then \
 # to use MX-FP4 models.") and lists `amd-quark>=0.8.99` in requirements/rocm.txt,
 # but the published vllm-openai-rocm image does NOT bake it in — so we add it.
 # Pure-python wheel (py3-none-any) with no torch dep, so unlike the flashinfer
-# trio it cannot disturb the base's ROCm torch; installed WITH deps (its only
-# heavy constraint is numpy<=2.1.3, which matches vLLM's own ROCm resolution).
-# Pinned for reproducibility. Gated to ROCm: CUDA uses the flashinfer quant paths.
-ARG QUARK_VERSION=0.11.2
+# trio it cannot disturb the base's ROCm torch; installed WITH deps (deps are
+# numpy>=2.0 + onnx/pandas/etc., all torch-free). Gated to ROCm: CUDA uses the
+# flashinfer quant paths.
+#
+# Pinned to the 0.12 pre-release on purpose: the base ships torch 2.11, which
+# REMOVED torch.ao.quantization.pt2e (migrated to torchao). amd-quark<=0.11.2
+# imports torch.ao.quantization.pt2e eagerly at module top level, so any
+# `import quark.torch` hard-crashes on torch 2.11 (ModuleNotFoundError: No module
+# named 'torch.ao.quantization.pt2e'). 0.12rcX centralizes that behind a
+# torch-version guard that uses torchao.quantization.pt2e on torch>=2.11 (or a
+# lazy stub if torchao is absent — vLLM's MX-FP4 *inference* uses the kernel path,
+# not graph-PTQ, so the stub isn't tripped). No stable 0.12 exists yet; revisit
+# this pin when one ships.
+ARG QUARK_VERSION=0.12rc3
 RUN if [ "$ACCEL" = "rocm" ]; then \
         pip install --no-cache-dir amd-quark==${QUARK_VERSION}; \
     fi
