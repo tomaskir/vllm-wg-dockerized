@@ -29,7 +29,7 @@ on:
       flashinfer_version:
         description: flashinfer pin for the commit (vLLM docker/Dockerfile ARG FLASHINFER_VERSION)
         required: true
-        default: 0.6.12
+        default: 0.6.13
       image_tag:
         description: Immutable dev tag, e.g. cuda-0.22.1rc1.dev164-ga6183563b-1 (must NOT look like a release tag)
         required: true

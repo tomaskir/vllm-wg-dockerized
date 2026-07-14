@@ -6,7 +6,7 @@
 # BASE_IMAGE selects the upstream vLLM runtime to extend:
 #   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
 #   - ROCm: vllm/vllm-openai-rocm:vX.Y.Z         (pin to a semver tag)
-ARG BASE_IMAGE=vllm/vllm-openai:v0.24.0
+ARG BASE_IMAGE=vllm/vllm-openai:v0.25.1
 
 # --------------------------------------------------------------------
 # Stage 1: fetch wireproxy (pinned release + sha256 verification)
@@ -31,7 +31,7 @@ RUN curl -fsSL -o wireproxy.tar.gz \
 # Stage 2: final image extending vLLM.
 # ACCEL gates accelerator-specific installs (the CUDA-only flashinfer trio).
 # Two knobs make dev/unreleased vLLM builds first-class without editing this
-# file: FLASHINFER_VERSION (defaults to the v0.24.0 base's pin) and the
+# file: FLASHINFER_VERSION (defaults to the v0.25.1 base's pin) and the
 # VLLM_WHEEL_URL / VLLM_WHEEL_SHA256 pair, which overlays a pinned per-commit
 # wheel from wheels.vllm.ai over the base. See "Building against an unreleased
 # vLLM dev commit" in CLAUDE.md.
@@ -40,15 +40,15 @@ FROM ${BASE_IMAGE}
 
 ARG ACCEL=cuda
 # The flashinfer version for BOTH stable and dev-overlay CUDA builds. Default =
-# the v0.24.0 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
+# the v0.25.1 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
 # the vLLM base for a release, re-check vLLM's flashinfer pin (its
 # docker/Dockerfile `ARG FLASHINFER_VERSION` / versions.json) and update this
 # default if it moved, or the trio drifts from the base (e.g. 0.22.0 -> 0.23.0
-# moved it 0.6.11.post2 -> 0.6.12; 0.23.0 -> 0.24.0 left it at 0.6.12). When
-# overlaying a dev-commit wheel
+# moved it 0.6.11.post2 -> 0.6.12; 0.23.0 -> 0.24.0 left it at 0.6.12;
+# 0.24.0 -> 0.25.1 moved it 0.6.12 -> 0.6.13). When overlaying a dev-commit wheel
 # (VLLM_WHEEL_URL below), pass the commit's pin as a build-arg instead. jit-cache
 # AOT kernels must match runtime.
-ARG FLASHINFER_VERSION=0.6.12
+ARG FLASHINFER_VERSION=0.6.13
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -100,9 +100,10 @@ RUN if [ "$ACCEL" = "cuda" ]; then \
 # named 'torch.ao.quantization.pt2e'). 0.12rcX centralizes that behind a
 # torch-version guard that uses torchao.quantization.pt2e on torch>=2.11 (or a
 # lazy stub if torchao is absent — vLLM's MX-FP4 *inference* uses the kernel path,
-# not graph-PTQ, so the stub isn't tripped). No stable 0.12 exists yet; revisit
-# this pin when one ships.
-ARG QUARK_VERSION=0.12rc3
+# not graph-PTQ, so the stub isn't tripped). Stable 0.12 shipped as 0.12.post1
+# (still carries the same torch>=2.11 pt2e guard, still py3-none-any + torch-free),
+# so we now pin the stable release instead of the earlier 0.12rcX prereleases.
+ARG QUARK_VERSION=0.12.post1
 RUN if [ "$ACCEL" = "rocm" ]; then \
         pip install --no-cache-dir amd-quark==${QUARK_VERSION}; \
     fi
