@@ -68,7 +68,12 @@ RUN apt-get update \
         ca-certificates \
         python-is-python3 \
         git \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # openssh-server's postinst generates host keys at install time, which would
+    # bake identical (and publicly-pullable) host keys into every container from
+    # this image. Delete them; the entrypoint's `ssh-keygen -A` then generates
+    # fresh per-container keys at startup.
+    && rm -f /etc/ssh/ssh_host_*
 
 # flashinfer trio (CUDA only), wheel-published for CUDA only. python/cubin are
 # already base deps; jit-cache is the heavy ~1.8GB AOT-kernel add and is NOT a
