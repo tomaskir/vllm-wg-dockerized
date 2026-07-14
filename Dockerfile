@@ -49,6 +49,11 @@ ARG ACCEL=cuda
 # (VLLM_WHEEL_URL below), pass the commit's pin as a build-arg instead. jit-cache
 # AOT kernels must match runtime.
 ARG FLASHINFER_VERSION=0.6.13
+# Wheel index for flashinfer-jit-cache. The cuXXX suffix must match the base
+# torch's CUDA build (the +cuXXX in torch.__version__), which moves
+# independently of FLASHINFER_VERSION when the base bumps its CUDA toolchain —
+# re-check it on every vLLM base bump.
+ARG FLASHINFER_CUDA_INDEX=cu130
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -86,7 +91,7 @@ RUN apt-get update \
 # overlay so a --no-deps wheel install lands on the intended flashinfer.
 RUN if [ "$ACCEL" = "cuda" ]; then \
         pip install --no-cache-dir --no-deps flashinfer-python==${FLASHINFER_VERSION} flashinfer-cubin==${FLASHINFER_VERSION} \
-        && pip install --no-cache-dir --no-deps flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/cu130; \
+        && pip install --no-cache-dir --no-deps flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/${FLASHINFER_CUDA_INDEX}; \
     fi
 
 # amd-quark (ROCm only): AMD's Quark quantization runtime. vLLM refuses to load
@@ -112,6 +117,19 @@ ARG QUARK_VERSION=0.12.post1
 RUN if [ "$ACCEL" = "rocm" ]; then \
         pip install --no-cache-dir amd-quark==${QUARK_VERSION}; \
     fi
+
+# Eval tooling (both streams): benchmark the served model from inside the
+# rental. Unlike flashinfer these install WITH deps so their trees resolve —
+# which can upgrade base pins (transformers, numpy, ...). Gated with the same
+# scoped pip check as the dev-wheel overlay below so a resolve that breaks the
+# vLLM stack fails the build instead of drifting silently. Sits BEFORE the
+# overlay and the FLA patch — the two most frequently changing steps — so
+# changing those doesn't invalidate this heavy download layer.
+RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor \
+    && pc="$(pip check 2>&1 || true)" && echo "$pc" \
+    && { echo "$pc" | grep -qiE '(torch|vllm|flashinfer|xformers)' \
+            && { echo "ERROR: pip check flagged a conflict in the vLLM stack (above)"; exit 1; } \
+            || true; }
 
 # Optional: pin vLLM to a specific upstream dev commit that has no released
 # image yet (e.g. a fix that landed after the last vLLM tag). Point
@@ -170,23 +188,12 @@ RUN sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm
         "$sp/vllm/model_executor/layers/fla/ops/utils.py" \
     && echo "vLLM FLA input_guard torch.compile patch applied"
 
-# Eval tooling (both streams): benchmark the served model from inside the
-# rental. Unlike flashinfer these install WITH deps so their trees resolve —
-# which can upgrade base pins (transformers, numpy, ...). Gate with the same
-# scoped pip check as the wheel overlay above so a resolve that breaks the
-# vLLM stack fails the build instead of drifting silently.
-RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor \
-    && pc="$(pip check 2>&1 || true)" && echo "$pc" \
-    && { echo "$pc" | grep -qiE '(torch|vllm|flashinfer|xformers)' \
-            && { echo "ERROR: pip check flagged a conflict in the vLLM stack (above)"; exit 1; } \
-            || true; }
 # HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
 # huggingface_hub auto-installs the hf-xet backend. HF_XET_HIGH_PERFORMANCE is
 # the Xet equivalent of the old HF_HUB_ENABLE_HF_TRANSFER=1 fast-transfer flag.
 ENV HF_XET_HIGH_PERFORMANCE=1
 
 COPY --from=wireproxy-fetch /usr/local/bin/wireproxy /usr/local/bin/wireproxy
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0755 /usr/local/bin/entrypoint.sh
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
