@@ -30,6 +30,10 @@ on:
         description: flashinfer pin for the commit (vLLM docker/Dockerfile ARG FLASHINFER_VERSION)
         required: true
         default: 0.6.13
+      flashinfer_cuda_index:
+        description: flashinfer wheel-index cuXXX suffix (must match the base torch's +cuXXX build)
+        required: true
+        default: cu130
       image_tag:
         description: Immutable dev tag, e.g. cuda-0.22.1rc1.dev164-ga6183563b-1 (must NOT look like a release tag)
         required: true
@@ -87,6 +91,7 @@ jobs:
             BASE_IMAGE=${{ inputs.base_image }}
             ACCEL=${{ inputs.accel }}
             FLASHINFER_VERSION=${{ inputs.flashinfer_version }}
+            FLASHINFER_CUDA_INDEX=${{ inputs.flashinfer_cuda_index }}
             VLLM_WHEEL_URL=${{ inputs.vllm_wheel_url }}
             VLLM_WHEEL_SHA256=${{ inputs.vllm_wheel_sha256 }}
           # Single immutable dev tag — no floaters. Reuse the release cache for

@@ -119,7 +119,7 @@ Two parallel streams, one per accelerator. CI workflows live in `.github/workflo
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z-N` — **immutable** per-build artifact; pin here for reproducibility.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z` — **floats** to the newest `-N` for that vLLM version on CUDA.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:latest-cuda` — **floats** to the newest CUDA build overall.
-- When upgrading vLLM: push the new tag (`cuda-v0.23.0-1`). Usually no Dockerfile change — but if the new vLLM moved its flashinfer pin (e.g. 0.22.0 → 0.23.0 bumped flashinfer `0.6.11.post2` → `0.6.12`; note the intermediate `0.22.1` release left it at `0.6.11.post2`), bump the `FLASHINFER_VERSION` default in the Dockerfile to match. Read the pin from the release tag's `requirements/cuda.txt`, not from release notes or a dev commit. It is not auto-derived from the tag, and the flashinfer trio is installed `--no-deps`, so a stale default silently drifts from the base.
+- When upgrading vLLM: push the new tag (`cuda-v0.23.0-1`). Usually no Dockerfile change — but if the new vLLM moved its flashinfer pin (e.g. 0.22.0 → 0.23.0 bumped flashinfer `0.6.11.post2` → `0.6.12`; note the intermediate `0.22.1` release left it at `0.6.11.post2`), bump the `FLASHINFER_VERSION` default in the Dockerfile to match. Read the pin from the release tag's `requirements/cuda.txt`, not from release notes or a dev commit. It is not auto-derived from the tag, and the flashinfer trio is installed `--no-deps`, so a stale default silently drifts from the base. Also re-check the `FLASHINFER_CUDA_INDEX` default (the jit-cache wheel-index `cuXXX` suffix) against the base torch's `+cuXXX` build — it moves when the base bumps its CUDA toolchain, independently of the flashinfer version.
 
 ### ROCm — tag scheme `rocm-v<vllm-version>-<N>`
 
@@ -146,6 +146,7 @@ Sometimes a fix lands in vLLM `main` before any release tag (or its image) exist
 - `VLLM_WHEEL_URL` — the immutable per-commit wheel URL.
 - `VLLM_WHEEL_SHA256` — its checksum. Both must be set together; the build fails on a partial/unpinned config, same as the wireproxy gate. The wheel is installed `--no-deps`, so the base's compiled stack (torch, xformers) is left untouched.
 - `FLASHINFER_VERSION` — set to the commit's flashinfer pin (vLLM's `docker/Dockerfile` `ARG FLASHINFER_VERSION` / `versions.json`) so the jit-cache AOT kernels match.
+- `FLASHINFER_CUDA_INDEX` — only if the chosen base's torch carries a different `+cuXXX` build than the default (`cu130`); the jit-cache wheel index must match it.
 
 **Before using it, confirm the overlay is coherent** — diff the target commit against the chosen base:
 
