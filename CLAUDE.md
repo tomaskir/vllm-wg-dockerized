@@ -90,7 +90,7 @@ All via environment variables. No config files, no CLI flags beyond what the ent
 | `SSH_PUBLIC_KEY` | yes\* | — | authorized public key written to `/root/.ssh/authorized_keys`. Pubkey auth only. |
 | `PUBLIC_KEY` | yes\* | — | alias for compatibility with provider conventions that use this name; consulted if `SSH_PUBLIC_KEY` is unset. |
 
-\*Exactly one of `SSH_PUBLIC_KEY` or `PUBLIC_KEY` must be set; container refuses to start otherwise.
+\*At least one of `SSH_PUBLIC_KEY` or `PUBLIC_KEY` must be set (`SSH_PUBLIC_KEY` wins if both are); container refuses to start otherwise.
 
 ### vLLM (optional auto-start)
 

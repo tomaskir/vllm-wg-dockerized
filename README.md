@@ -38,7 +38,7 @@ Capture the generated `VLLM_API_KEY` from the container logs on first start. Oth
 
 `LISTEN_PORTS` is comma-separated; each port `N` becomes a wireproxy `[TCPServerTunnel]` with `ListenPort = N` and `Target = 127.0.0.1:N`. Use this to also expose SSH (`22`) or anything else you start inside the container.
 
-**Image tags.** `:latest-cuda` / `:latest-rocm` float to the newest build of each accelerator. `:cuda-vX.Y.Z` floats to the newest build of that vLLM version on CUDA. For reproducible deployments, pin to an immutable per-build tag like `:cuda-v0.23.0-1` or `:rocm-v0.23.0-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
+**Image tags.** `:latest-cuda` / `:latest-rocm` float to the newest build of each accelerator. `:cuda-vX.Y.Z` floats to the newest build of that vLLM version on CUDA. For reproducible deployments, pin to an immutable per-build tag like `:cuda-v0.25.1-1` or `:rocm-v0.25.1-1`. See [CLAUDE.md](./CLAUDE.md#building) for the full tag scheme.
 
 ## Env vars
 
@@ -54,15 +54,15 @@ Optional: `VLLM_MODEL` to auto-start serving, and `HF_TOKEN` if the model is gat
 ```bash
 # CUDA
 docker build \
-  --build-arg BASE_IMAGE=vllm/vllm-openai:v0.23.0 \
+  --build-arg BASE_IMAGE=vllm/vllm-openai:v0.25.1 \
   --build-arg ACCEL=cuda \
-  -t ghcr.io/tomaskir/vllm-wg-dockerized:cuda-v0.23.0-1 .
+  -t ghcr.io/tomaskir/vllm-wg-dockerized:cuda-v0.25.1-1 .
 
 # ROCm
 docker build \
-  --build-arg BASE_IMAGE=vllm/vllm-openai-rocm:v0.23.0 \
+  --build-arg BASE_IMAGE=vllm/vllm-openai-rocm:v0.25.1 \
   --build-arg ACCEL=rocm \
-  -t ghcr.io/tomaskir/vllm-wg-dockerized:rocm-v0.23.0-1 .
+  -t ghcr.io/tomaskir/vllm-wg-dockerized:rocm-v0.25.1-1 .
 ```
 
 To build against an **unreleased vLLM dev commit** (a fix not yet in any release), overlay a pinned per-commit wheel via `VLLM_WHEEL_URL` / `VLLM_WHEEL_SHA256` (+ `FLASHINFER_VERSION`) — locally, or in CI via the manual `build-dev-commit` GitHub Actions workflow. See [CLAUDE.md](./CLAUDE.md#building-against-an-unreleased-vllm-dev-commit) for the coherence checks and a worked example.
