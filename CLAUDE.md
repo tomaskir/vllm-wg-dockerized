@@ -64,6 +64,8 @@ Single container, three supervised processes (vLLM optional):
 - One `[TCPServerTunnel]` block is rendered per port in `LISTEN_PORTS`; each accepts inbound TCP at `WG_ADDRESS:<port>` and proxies to `127.0.0.1:<port>`.
 - sshd binds `0.0.0.0:22` separately from wireproxy — that's the deliberate escape hatch via the platform's port-mapping. The operator may also include `22` in `LISTEN_PORTS` to make SSH reachable over WG.
 
+The image also bundles eval tooling (`lm_eval`, `inspect_ai`, `inspect_evals`, `instanttensor`) so the operator can benchmark the served model from inside the rental (typically over SSH). These install with their dependency trees — the only layer that does — so the Dockerfile gates the install with a scoped `pip check` that fails the build if the resolve disturbs the vLLM stack (torch/vllm/flashinfer/xformers).
+
 ## Configuration
 
 All via environment variables. No config files, no CLI flags beyond what the entrypoint passes through to vLLM.

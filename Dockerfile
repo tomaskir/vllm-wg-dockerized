@@ -170,7 +170,16 @@ RUN sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm
         "$sp/vllm/model_executor/layers/fla/ops/utils.py" \
     && echo "vLLM FLA input_guard torch.compile patch applied"
 
-RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor
+# Eval tooling (both streams): benchmark the served model from inside the
+# rental. Unlike flashinfer these install WITH deps so their trees resolve —
+# which can upgrade base pins (transformers, numpy, ...). Gate with the same
+# scoped pip check as the wheel overlay above so a resolve that breaks the
+# vLLM stack fails the build instead of drifting silently.
+RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor \
+    && pc="$(pip check 2>&1 || true)" && echo "$pc" \
+    && { echo "$pc" | grep -qiE '(torch|vllm|flashinfer|xformers)' \
+            && { echo "ERROR: pip check flagged a conflict in the vLLM stack (above)"; exit 1; } \
+            || true; }
 # HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
 # huggingface_hub auto-installs the hf-xet backend. HF_XET_HIGH_PERFORMANCE is
 # the Xet equivalent of the old HF_HUB_ENABLE_HF_TRANSFER=1 fast-transfer flag.
