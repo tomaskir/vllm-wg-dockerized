@@ -42,13 +42,24 @@ fi
 # --------------------------------------------------------------------
 IFS=',' read -ra RAW_PORTS <<< "$LISTEN_PORTS"
 PORTS=()
+declare -A seen_ports
 for raw in "${RAW_PORTS[@]}"; do
     port="${raw// /}"
     [[ -z "$port" ]] && continue
-    if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+    # {1,5} bounds the digits so 10# arithmetic below can't overflow; 10# forces
+    # decimal, since bash arithmetic reads leading-zero values as octal.
+    if ! [[ "$port" =~ ^[0-9]{1,5}$ ]]; then
         echo "FATAL: invalid port in LISTEN_PORTS: '$port'" >&2
         exit 1
     fi
+    port=$((10#$port))
+    if (( port < 1 || port > 65535 )); then
+        echo "FATAL: invalid port in LISTEN_PORTS: '$port'" >&2
+        exit 1
+    fi
+    # Dedupe: a repeated port would render two [TCPServerTunnel] blocks.
+    [[ -n "${seen_ports[$port]:-}" ]] && continue
+    seen_ports[$port]=1
     PORTS+=("$port")
 done
 if (( ${#PORTS[@]} == 0 )); then
@@ -110,6 +121,7 @@ ssh-keygen -A >/dev/null
 # Container exits as soon as any supervised process exits.
 # --------------------------------------------------------------------
 declare -A pids
+# shellcheck disable=SC2329  # invoked indirectly via trap
 cleanup() {
     for name in "${!pids[@]}"; do
         pid="${pids[$name]}"
@@ -117,6 +129,9 @@ cleanup() {
             kill "$pid" 2>/dev/null || true
         fi
     done
+    # Wait for children to exit so vLLM gets the runtime's stop grace period
+    # to drain; PID 1 exiting would kill the namespace outright.
+    wait
 }
 trap cleanup EXIT INT TERM
 
