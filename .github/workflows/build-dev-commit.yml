@@ -19,7 +19,7 @@ on:
       base_image:
         description: Released vLLM base to overlay onto (must share the commit's torch pin)
         required: true
-        default: vllm/vllm-openai:v0.23.0
+        default: vllm/vllm-openai:v0.25.1
       vllm_wheel_url:
         description: Immutable per-commit wheel URL (https://wheels.vllm.ai/<full-sha>/...whl)
         required: true
