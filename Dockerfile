@@ -6,7 +6,7 @@
 # BASE_IMAGE selects the upstream vLLM runtime to extend:
 #   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
 #   - ROCm: vllm/vllm-openai-rocm:vX.Y.Z         (pin to a semver tag)
-ARG BASE_IMAGE=vllm/vllm-openai:v0.25.1
+ARG BASE_IMAGE=vllm/vllm-openai:v0.27.1
 
 # --------------------------------------------------------------------
 # Stage 1: fetch wireproxy (pinned release + sha256 verification)
@@ -31,7 +31,7 @@ RUN curl -fsSL -o wireproxy.tar.gz \
 # Stage 2: final image extending vLLM.
 # ACCEL gates accelerator-specific installs (the CUDA-only flashinfer trio).
 # Two knobs make dev/unreleased vLLM builds first-class without editing this
-# file: FLASHINFER_VERSION (defaults to the v0.25.1 base's pin) and the
+# file: FLASHINFER_VERSION (defaults to the v0.27.1 base's pin) and the
 # VLLM_WHEEL_URL / VLLM_WHEEL_SHA256 pair, which overlays a pinned per-commit
 # wheel from wheels.vllm.ai over the base. See "Building against an unreleased
 # vLLM dev commit" in CLAUDE.md.
@@ -40,15 +40,16 @@ FROM ${BASE_IMAGE}
 
 ARG ACCEL=cuda
 # The flashinfer version for BOTH stable and dev-overlay CUDA builds. Default =
-# the v0.25.1 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
+# the v0.27.1 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
 # the vLLM base for a release, re-check vLLM's flashinfer pin (its
 # docker/Dockerfile `ARG FLASHINFER_VERSION` / versions.json) and update this
 # default if it moved, or the trio drifts from the base (e.g. 0.22.0 -> 0.23.0
 # moved it 0.6.11.post2 -> 0.6.12; 0.23.0 -> 0.24.0 left it at 0.6.12;
-# 0.24.0 -> 0.25.1 moved it 0.6.12 -> 0.6.13). When overlaying a dev-commit wheel
+# 0.24.0 -> 0.25.1 moved it 0.6.12 -> 0.6.13; 0.25.1 -> 0.27.1 moved it
+# 0.6.13 -> 0.6.16.post3). When overlaying a dev-commit wheel
 # (VLLM_WHEEL_URL below), pass the commit's pin as a build-arg instead. jit-cache
 # AOT kernels must match runtime.
-ARG FLASHINFER_VERSION=0.6.13
+ARG FLASHINFER_VERSION=0.6.16.post3
 # Wheel index for flashinfer-jit-cache. The cuXXX suffix must match the base
 # torch's CUDA build (the +cuXXX in torch.__version__), which moves
 # independently of FLASHINFER_VERSION when the base bumps its CUDA toolchain —
@@ -86,36 +87,34 @@ RUN apt-get update \
 # wheel's flashinfer pin; the jit-cache kernels must match the runtime flashinfer
 # or they drift. --no-deps is REQUIRED: a flashinfer version bump otherwise
 # re-resolves its dependency closure and drags in a conflicting torch (e.g. 0.6.12
-# pulls torch 2.9.1 + cuda-toolkit, clobbering the base's 2.11.0+cu130). We keep
-# the base's torch and only swap the flashinfer packages. Runs before the vLLM
-# overlay so a --no-deps wheel install lands on the intended flashinfer.
+# pulls torch 2.9.1 + cuda-toolkit, clobbering the base's torch — 2.13.0+cu130 as
+# of the v0.27.1 base). We keep the base's torch and only swap the flashinfer
+# packages. Runs before the vLLM overlay so a --no-deps wheel install lands on
+# the intended flashinfer. The root flashinfer.ai index is an EXTRA index for
+# python/cubin because flashinfer-cubin left PyPI after 0.6.13 (upstream
+# requirements/cuda.txt carries the same --extra-index-url); the cuXXX subdir
+# index stays on the jit-cache line only.
 RUN if [ "$ACCEL" = "cuda" ]; then \
         pip install --no-cache-dir --no-deps flashinfer-python==${FLASHINFER_VERSION} flashinfer-cubin==${FLASHINFER_VERSION} \
+            --extra-index-url https://flashinfer.ai/whl/ \
         && pip install --no-cache-dir --no-deps flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/${FLASHINFER_CUDA_INDEX}; \
     fi
 
 # amd-quark (ROCm only): AMD's Quark quantization runtime. vLLM refuses to load
 # MX-FP4 / Quark-quantized models without it ("The package `amd-quark` is required
-# to use MX-FP4 models.") and lists `amd-quark>=0.8.99` in requirements/rocm.txt,
-# but the published vllm-openai-rocm image does NOT bake it in — so we add it.
-# Pure-python wheel (py3-none-any) with no torch dep, so unlike the flashinfer
-# trio it cannot disturb the base's ROCm torch; installed WITH deps (deps are
-# numpy>=2.0 + onnx/pandas/etc., all torch-free). Gated to ROCm: CUDA uses the
-# flashinfer quant paths.
-#
-# Pinned to the 0.12 pre-release on purpose: the base ships torch 2.11, which
-# REMOVED torch.ao.quantization.pt2e (migrated to torchao). amd-quark<=0.11.2
-# imports torch.ao.quantization.pt2e eagerly at module top level, so any
-# `import quark.torch` hard-crashes on torch 2.11 (ModuleNotFoundError: No module
-# named 'torch.ao.quantization.pt2e'). 0.12rcX centralizes that behind a
-# torch-version guard that uses torchao.quantization.pt2e on torch>=2.11 (or a
-# lazy stub if torchao is absent — vLLM's MX-FP4 *inference* uses the kernel path,
-# not graph-PTQ, so the stub isn't tripped). Stable 0.12 shipped as 0.12.post1
-# (still carries the same torch>=2.11 pt2e guard, still py3-none-any + torch-free),
-# so we now pin the stable release instead of the earlier 0.12rcX prereleases.
-ARG QUARK_VERSION=0.12.post1
+# to use MX-FP4 models."). Through v0.25.1 this repo installed it because the
+# published vllm-openai-rocm image did not bake it in — but as of the v0.27.x
+# base upstream hard-pins `amd-quark==0.12.post1` in requirements/rocm.txt, bakes
+# it into the image (verified in the published layers back to v0.25.1), and the
+# ROCm-built vLLM wheel declares `Requires-Dist: amd-quark==0.12.post1`. An
+# install pin here would therefore either be a no-op or, worse, DOWNGRADE a
+# future base whose pin moved and break its vllm dependency. So this is now an
+# ASSERT, not an install: fail the build loudly if a future ROCm base ever ships
+# without amd-quark again — then decide the right version from that base's
+# requirements/rocm.txt rather than auto-installing a stale pin.
 RUN if [ "$ACCEL" = "rocm" ]; then \
-        pip install --no-cache-dir amd-quark==${QUARK_VERSION}; \
+        python -c "import importlib.metadata as m; print('amd-quark baked into base:', m.version('amd-quark'))" \
+        || { echo "ERROR: ROCm base no longer ships amd-quark; re-add an explicit install matched to this base's requirements/rocm.txt" >&2; exit 1; }; \
     fi
 
 # Eval tooling (both streams): benchmark the served model from inside the
@@ -170,22 +169,28 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
 # 2.11's Dynamo skiplist, so vLLM's AOT full-graph compile of GDN / linear-
 # attention backbones (Qwen3-Next, gated-delta-net, ...) crashes with "Attempted
 # to inline function marked as skipped". Cherry-pick of the still-open, conflict-
-# stalled upstream fix (vLLM PR #40921 / issue #40919; torch pytorch/pytorch#181540):
-# route the device guard through torch.cuda.device(), which Dynamo CAN trace. Not
-# ACCEL-gated — the bug hits CUDA and ROCm alike (ROCm tensors report
-# device.type=='cuda', so they take the same traceable branch). Runs AFTER the
-# optional dev-wheel overlay so an overlaid vLLM is patched too. Plain `git apply`
-# (no --3way/--forward) makes the build FAIL LOUDLY if a future base refactors or
-# upstream-merges this — the signal to delete this patch on the next vLLM bump.
+# stalled upstream fix (vLLM PR #40921 / issue #40919): route the device guard
+# through torch.cuda.device(), which Dynamo CAN trace. Rebased for v0.26.0+'s
+# tree move (vllm/model_executor/layers/fla/ -> vllm/third_party/
+# flash_linear_attention/, vLLM PR #48500). torch itself fixed the root cause in
+# 2.13 (pytorch/pytorch#181540, fixed by #181846) — which the v0.27.1 CUDA base
+# ships — but the ROCm base still builds ROCm/pytorch release/2.11, so the patch
+# is still REQUIRED there. Deliberately not ACCEL-gated: on torch 2.13 the
+# patched branch (torch.cuda.device) is equally traceable and semantically
+# equivalent, so one unconditional patch keeps the streams identical. Drop it
+# when the ROCm base moves to torch >= 2.13. Runs AFTER the optional dev-wheel
+# overlay so an overlaid vLLM is patched too. Plain `git apply` (no
+# --3way/--forward) makes the build FAIL LOUDLY if a future base refactors or
+# upstream-merges this — the signal to re-evaluate the patch on the next bump.
 COPY patches/vllm-fla-input-guard-dynamo.patch /tmp/vllm-fla-input-guard-dynamo.patch
 RUN sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm.__file__)))')" \
     && git -C "$sp" apply --verbose -p1 /tmp/vllm-fla-input-guard-dynamo.patch \
     && rm -f /tmp/vllm-fla-input-guard-dynamo.patch \
     && python -m py_compile \
         "$sp/vllm/platforms/interface.py" \
-        "$sp/vllm/model_executor/layers/fla/ops/utils.py" \
+        "$sp/vllm/third_party/flash_linear_attention/ops/utils.py" \
     && grep -q 'get_device_context(tensor.device)' \
-        "$sp/vllm/model_executor/layers/fla/ops/utils.py" \
+        "$sp/vllm/third_party/flash_linear_attention/ops/utils.py" \
     && echo "vLLM FLA input_guard torch.compile patch applied"
 
 # HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
