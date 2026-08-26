@@ -107,6 +107,17 @@ umask 077
 } > "$WIREPROXY_CONF"
 umask 022
 
+# Validate the rendered config before touching anything else. wireproxy's
+# configtest is the only thing that actually checks the WG keys (base64 form and
+# 32-byte length) and the endpoint; without it a bad key surfaces only after
+# authorized_keys, fresh host keys and sshd are already in place — a half-wired
+# container. Note it does NOT catch a missing Address prefix (it reports
+# "Config OK"), which is why the explicit WG_ADDRESS check above stays.
+if ! wireproxy_check="$(wireproxy -n -c "$WIREPROXY_CONF" 2>&1)"; then
+    echo "FATAL: wireproxy rejected the rendered config: ${wireproxy_check}" >&2
+    exit 1
+fi
+
 # --------------------------------------------------------------------
 # SSH setup
 # --------------------------------------------------------------------
@@ -154,12 +165,14 @@ pids[sshd]=$!
 
 if [[ -n "${VLLM_MODEL:-}" ]]; then
     echo "Starting vLLM: model=${VLLM_MODEL} bind=127.0.0.1:8000"
-    # VLLM_EXTRA_ARGS intentionally unquoted to allow word-splitting
+    # The API key is passed via the exported VLLM_API_KEY env var, NOT --api-key:
+    # vLLM resolves `args.api_key or [envs.VLLM_API_KEY]`, so both are equivalent,
+    # but an argv flag would expose the key in `ps` to anything running in the
+    # container. VLLM_EXTRA_ARGS intentionally unquoted to allow word-splitting
     # shellcheck disable=SC2086
     vllm serve "$VLLM_MODEL" \
         --host 127.0.0.1 \
         --port 8000 \
-        --api-key "$VLLM_API_KEY" \
         ${VLLM_EXTRA_ARGS:-} &
     pids[vllm]=$!
 else

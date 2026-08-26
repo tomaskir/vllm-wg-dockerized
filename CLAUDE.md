@@ -27,7 +27,7 @@ Compute / GPU rental providers typically rent unprivileged containers that grant
 
 ### ALWAYS Do
 
-- **ALWAYS fail fast at startup on missing config.** The entrypoint must `exit 1` if any required env var is absent rather than starting a half-wired container.
+- **ALWAYS fail fast at startup on missing config.** The entrypoint must `exit 1` if any required env var is absent rather than starting a half-wired container. The same applies to *malformed* config: after rendering `/etc/wireproxy.conf` the entrypoint runs `wireproxy -n` (configtest) and refuses to continue if it is rejected. That runs before authorized_keys, host-key generation and sshd, so a bad WG key never yields a half-wired container. It is also the only thing that actually validates the keys — note it does NOT catch a missing `WG_ADDRESS` prefix (it reports `Config OK`), which is why the explicit prefix check stays.
 - **ALWAYS log to stdout/stderr only.** No log files; the orchestrator handles persistence.
 - **ALWAYS surface a generated `VLLM_API_KEY` loudly once at startup.** If we generated it, the operator needs to capture it from logs immediately.
 - **ALWAYS encode the upstream vLLM base in our own tag.** Both streams' bridge tags carry the vLLM semver — `cuda-vX.Y.Z-N` for CUDA, `rocm-vX.Y.Z-N` for ROCm — and CI derives `BASE_IMAGE` from it (`vllm/vllm-openai:vX.Y.Z` / `vllm/vllm-openai-rocm:vX.Y.Z`), so the bridge tag and the vLLM version cannot drift. Drift between bridge and vLLM versions makes debugging harder.
@@ -192,7 +192,7 @@ Typical flow on a compute / GPU rental provider:
 1. Operator generates a fresh WG keypair per rental (`wg genkey | tee priv | wg pubkey > pub`).
 2. Operator adds the public half as a `[Peer]` on the concentrator with a tightly-scoped `AllowedIPs`.
 3. Operator launches an instance against this image, passing all `WG_*` env vars, `SSH_PUBLIC_KEY` (or `PUBLIC_KEY`), `LISTEN_PORTS` (e.g. `8000,22`), and optionally `VLLM_MODEL`.
-4. Container starts: entrypoint validates env, renders `/etc/wireproxy.conf` (one `[TCPServerTunnel]` per port), installs authorized key, regenerates ssh host keys, starts wireproxy + sshd in background, generates/logs `VLLM_API_KEY`, starts vLLM (if `VLLM_MODEL` set) on `127.0.0.1:8000`.
+4. Container starts: entrypoint validates env, renders `/etc/wireproxy.conf` (one `[TCPServerTunnel]` per port), preflights it through `wireproxy -n`, installs authorized key, regenerates ssh host keys, starts wireproxy + sshd in background, generates/logs `VLLM_API_KEY`, starts vLLM (if `VLLM_MODEL` set) on `127.0.0.1:8000`. The key reaches vLLM through the exported `VLLM_API_KEY` env var rather than an `--api-key` flag, so it never appears in `ps`.
 5. Other peers on the WG network reach exposed services via `<WG_ADDRESS>:<port>` for each port in `LISTEN_PORTS`. The vLLM OpenAI API is at `http://<WG_ADDRESS>:8000/v1` with the surfaced key.
 6. Operator captures `VLLM_API_KEY` from container logs immediately after start.
 7. Operator SSHes via the provider's port-mapping endpoint OR via WG if `22` is in `LISTEN_PORTS`.
