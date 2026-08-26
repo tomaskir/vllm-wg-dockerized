@@ -119,7 +119,8 @@ Two parallel streams, one per accelerator. CI workflows live in `.github/workflo
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z-N` — **immutable** per-build artifact; pin here for reproducibility.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:cuda-vX.Y.Z` — **floats** to the newest `-N` for that vLLM version on CUDA.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:latest-cuda` — **floats** to the newest CUDA build overall.
-- When upgrading vLLM: push the new tag (`cuda-v0.23.0-1`). Usually no Dockerfile change — but if the new vLLM moved its flashinfer pin (e.g. 0.22.0 → 0.23.0 bumped flashinfer `0.6.11.post2` → `0.6.12`; the intermediate `0.22.1` release left it at `0.6.11.post2`; 0.25.1 → 0.27.1 bumped `0.6.13` → `0.6.16.post3`), bump the `FLASHINFER_VERSION` default in the Dockerfile to match. Read the pin from the release tag's `requirements/cuda.txt`, not from release notes or a dev commit. It is not auto-derived from the tag, and the flashinfer trio is installed `--no-deps`, so a stale default silently drifts from the base. Note `flashinfer-cubin` left PyPI after `0.6.13` — the python/cubin install needs `--extra-index-url https://flashinfer.ai/whl/` (the root index; already in the Dockerfile, mirroring upstream's `requirements/cuda.txt`). Also re-check the `FLASHINFER_CUDA_INDEX` default (the jit-cache wheel-index `cuXXX` suffix) against the base torch's `+cuXXX` build — it moves when the base bumps its CUDA toolchain, independently of the flashinfer version.
+- When upgrading vLLM: push the new tag (`cuda-v0.23.0-1`). Usually no Dockerfile change — but if the new vLLM moved its flashinfer pin (e.g. 0.22.0 → 0.23.0 bumped flashinfer `0.6.11.post2` → `0.6.12`; the intermediate `0.22.1` release left it at `0.6.11.post2`; 0.25.1 → 0.27.1 bumped `0.6.13` → `0.6.16.post3`; 0.27.1 → 0.28.0 left it at `0.6.16.post3`), bump the `FLASHINFER_VERSION` default in the Dockerfile to match. Read the pin from the release tag's `requirements/cuda.txt`, not from release notes or a dev commit. It is not auto-derived from the tag, and the flashinfer trio is installed `--no-deps`, so a stale default silently drifts from the base. Note `flashinfer-cubin` left PyPI after `0.6.13` — the python/cubin install needs `--extra-index-url https://flashinfer.ai/whl/` (the root index; already in the Dockerfile, mirroring upstream's `requirements/cuda.txt`). Also re-check the `FLASHINFER_CUDA_INDEX` default (the jit-cache wheel-index `cuXXX` suffix) against the base torch's `+cuXXX` build — it moves when the base bumps its CUDA toolchain, independently of the flashinfer version.
+- The CUDA runtime base's **distro** can move too: v0.28.0 upgraded it from Ubuntu 22.04 to 24.04 (upstream PR #51058) while the ROCm base stayed on 22.04. Both still carry every apt package the Dockerfile installs, but any new package added there must exist on both.
 
 ### ROCm — tag scheme `rocm-v<vllm-version>-<N>`
 
@@ -130,10 +131,13 @@ Two parallel streams, one per accelerator. CI workflows live in `.github/workflo
   - `ghcr.io/tomaskir/vllm-wg-dockerized:rocm-vX.Y.Z` — **floats** to the newest `-N` for that vLLM version on ROCm.
   - `ghcr.io/tomaskir/vllm-wg-dockerized:latest-rocm` — **floats** to the newest ROCm build overall.
 - When upgrading vLLM: just push the new tag (`rocm-v0.22.1-1`). No Dockerfile change.
+- Watch the base's **torch line** (vLLM's `docker/Dockerfile.rocm_base` `ARG PYTORCH_BRANCH`): v0.28.0 moved it from ROCm/pytorch `release/2.11` to `release/2.12` (upstream PR #50607). It still predates the torch 2.13 Dynamo fix, so the vendored FLA patch below is still required on this stream.
 
 ### Both streams
 
 Never overwrite an existing `-N` tag. If you need to roll back, push a new `-N` that reverts; don't force-push the old one.
+
+`patches/vllm-fla-input-guard-dynamo.patch` is applied to the installed vLLM source with a plain `git apply` (no `--3way`/`--forward`), so a base whose source refactored — or that merged the fix — makes the build **fail loudly** at that step rather than silently skipping the patch. On every vLLM bump, re-validate it against the new tag's `vllm/platforms/interface.py` and `vllm/third_party/flash_linear_attention/ops/utils.py` before tagging. It exists for the torch-2.11/2.12 Dynamo break in the vendored flash-linear-attention `input_guard`; drop it once the **ROCm** base reaches torch ≥ 2.13 (the CUDA base already has the upstream torch fix). Verified clean against v0.28.0.
 
 To upgrade wireproxy: bump `WIREPROXY_VERSION` and `WIREPROXY_SHA256` in the Dockerfile (both must change together — leaving one stale will either fail the checksum or silently fetch the old binary). A wireproxy bump affects both streams; bump `-N` on both next time you tag.
 
