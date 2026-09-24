@@ -9,23 +9,34 @@
 ARG BASE_IMAGE=vllm/vllm-openai:v0.30.0
 
 # --------------------------------------------------------------------
-# Stage 1: fetch wireproxy (pinned release + sha256 verification)
+# Stage 1: build wireproxy from a pinned upstream commit
 # --------------------------------------------------------------------
-FROM debian:bookworm-slim AS wireproxy-fetch
+# Built from source rather than fetched as a release tarball: the newest release
+# (v1.1.3) predates two TCPServerTunnel fixes that only exist on master —
+# windtf/wireproxy#222 (every closed tunnel connection logged
+# "ERROR: Cannot forward traffic: ... use of closed network connection" through
+# wireproxy's own logger, which -s does not silence) and #223 (a refused
+# loopback target, e.g. vLLM still loading, left the WG-side connection open
+# until the peer timed out). Integrity is pinned end to end: the golang image by
+# digest, the source by full commit SHA (content-addressed — the checkout is
+# verified against it), and every Go module by the repo's go.sum. Go back to
+# the release-tarball + sha256 fetch once a release containing both fixes ships.
+FROM golang:1.26.8-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d AS wireproxy-build
 
-ARG WIREPROXY_VERSION=v1.1.3
-ARG WIREPROXY_SHA256=e88c1d090740373fc606c1bafd81d9a5eadc642cce5667616e20e9d7a444f51c
+ARG WIREPROXY_COMMIT=a4c5269015608fd202b61c746429ce9c278ae69e
+# Reported by `wireproxy -v`; git-describe form of WIREPROXY_COMMIT.
+ARG WIREPROXY_VERSION=v1.1.3-7-ga4c5269
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /tmp
-RUN curl -fsSL -o wireproxy.tar.gz \
-        "https://github.com/windtf/wireproxy/releases/download/${WIREPROXY_VERSION}/wireproxy_linux_amd64.tar.gz" \
-    && echo "${WIREPROXY_SHA256}  wireproxy.tar.gz" | sha256sum -c - \
-    && tar -xzf wireproxy.tar.gz \
-    && install -m 0755 wireproxy /usr/local/bin/wireproxy
+WORKDIR /src
+RUN git init -q . \
+    && git fetch -q --depth 1 https://github.com/windtf/wireproxy.git "${WIREPROXY_COMMIT}" \
+    && git checkout -q FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "${WIREPROXY_COMMIT}" \
+    && go mod verify \
+    && CGO_ENABLED=0 GOTOOLCHAIN=local go build -trimpath \
+        -ldflags "-s -w -X 'main.version=${WIREPROXY_VERSION}'" \
+        -o /usr/local/bin/wireproxy ./cmd/wireproxy \
+    && /usr/local/bin/wireproxy -v
 
 # --------------------------------------------------------------------
 # Stage 2: final image extending vLLM.
@@ -144,7 +155,7 @@ RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals i
 # VLLM_WHEEL_URL at the immutable per-commit wheel from
 # https://wheels.vllm.ai/<full-sha>/... and VLLM_WHEEL_SHA256 at its checksum.
 # Both must be set together or the build fails — we never install an unpinned
-# wheel (mirrors the wireproxy sha256 gate). Installed --no-deps so the base's
+# wheel (mirrors the wireproxy pinning). Installed --no-deps so the base's
 # torch/xformers stack and the flashinfer pinned above are preserved: only
 # coherent when the target commit shares the base's torch pin (verify) and
 # FLASHINFER_VERSION matches the commit's pin. Unset for release builds — no-op.
@@ -210,7 +221,7 @@ RUN sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm
 # the Xet equivalent of the old HF_HUB_ENABLE_HF_TRANSFER=1 fast-transfer flag.
 ENV HF_XET_HIGH_PERFORMANCE=1
 
-COPY --from=wireproxy-fetch /usr/local/bin/wireproxy /usr/local/bin/wireproxy
+COPY --from=wireproxy-build /usr/local/bin/wireproxy /usr/local/bin/wireproxy
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -22,8 +22,8 @@ Compute / GPU rental providers typically rent unprivileged containers that grant
 - **NEVER enable SSH password authentication.** sshd is configured `PasswordAuthentication=no` + `PermitRootLogin=prohibit-password`. Pubkey only. If `SSH_PUBLIC_KEY` / `PUBLIC_KEY` is unset, the container must refuse to start.
 - **NEVER auto-add a prefix to `WG_ADDRESS`.** Refuse to start if the prefix is missing. Guessing `/32` would let a misconfigured address silently match too much.
 - **NEVER reuse a WG peer key across rentals.** Treat every container instance's key as single-use; revoke and rotate on teardown.
-- **NEVER use floating image tags inside the Dockerfile.** The wireproxy release (`WIREPROXY_VERSION` + `WIREPROXY_SHA256`) is pinned. The vLLM base comes in via `ARG BASE_IMAGE` — CI always passes a fully-pinned reference: a vLLM semver tag for both streams (`vllm/vllm-openai:vX.Y.Z` for CUDA, `vllm/vllm-openai-rocm:vX.Y.Z` for ROCm). The Dockerfile's default `BASE_IMAGE` exists only as a local-dev convenience; production tags must never inherit it.
-- **NEVER weaken key validation or skip the wireproxy SHA256 check.** A wrong key or a tampered binary fails silently — verify in CI.
+- **NEVER use floating image tags inside the Dockerfile.** wireproxy is pinned end to end: the `golang` builder image by digest, the source by full commit SHA (`WIREPROXY_COMMIT`, verified after checkout), and its Go modules by `go.sum` (`go mod verify`). The vLLM base comes in via `ARG BASE_IMAGE` — CI always passes a fully-pinned reference: a vLLM semver tag for both streams (`vllm/vllm-openai:vX.Y.Z` for CUDA, `vllm/vllm-openai-rocm:vX.Y.Z` for ROCm). The Dockerfile's default `BASE_IMAGE` exists only as a local-dev convenience; production tags must never inherit it.
+- **NEVER weaken key validation or skip the wireproxy integrity checks** (commit-SHA check, `go mod verify`; or the SHA256 check when fetching a release tarball). A wrong key or a tampered binary fails silently — verify in CI.
 
 ### ALWAYS Do
 
@@ -139,7 +139,7 @@ Never overwrite an existing `-N` tag. If you need to roll back, push a new `-N` 
 
 `patches/vllm-fla-input-guard-dynamo.patch` is applied to the installed vLLM source with a plain `git apply` (no `--3way`/`--forward`), so a base whose source refactored — or that merged the fix — makes the build **fail loudly** at that step rather than silently skipping the patch. On every vLLM bump, re-validate it against the new tag's `vllm/platforms/interface.py` and `vllm/third_party/flash_linear_attention/ops/utils.py` before tagging. It exists for the torch-2.11/2.12 Dynamo break in the vendored flash-linear-attention `input_guard`; drop it once the **ROCm** base reaches torch ≥ 2.13 (the CUDA base already has the upstream torch fix). Verified clean against v0.30.0.
 
-To upgrade wireproxy: bump `WIREPROXY_VERSION` and `WIREPROXY_SHA256` in the Dockerfile (both must change together — leaving one stale will either fail the checksum or silently fetch the old binary). A wireproxy bump affects both streams; bump `-N` on both next time you tag.
+wireproxy is **built from source** at a pinned upstream commit (Dockerfile stage `wireproxy-build`), not fetched as a release tarball: the newest release, v1.1.3, predates two TCPServerTunnel fixes that exist only on master. windtf/wireproxy#222 stops `ERROR: Cannot forward traffic: ... use of closed network connection` from being logged on every closed tunnel connection. That line goes through wireproxy's own logger, so `-s` never silenced it. #223 closes the WG-side connection when the loopback target refuses (e.g. vLLM still loading) instead of leaving the peer hanging until timeout. To upgrade: bump `WIREPROXY_COMMIT` (full SHA) and `WIREPROXY_VERSION` (its `git describe` form, shown by `wireproxy -v`) together, and bump the `golang` image tag + digest if the new `go.mod` needs a newer Go. Once a release containing both fixes ships, go back to the release-tarball fetch with a pinned SHA256 (`git show a695edf:Dockerfile` has that stage). A wireproxy bump affects both streams; bump `-N` on both next time you tag.
 
 To build ROCm against an unreleased upstream snapshot (e.g. a specific `vllm/vllm-openai-rocm:nightly` digest) rather than a semver release, pass `BASE_IMAGE` explicitly to a local build; CI only builds from `rocm-vX.Y.Z` release tags.
 
@@ -148,7 +148,7 @@ To build ROCm against an unreleased upstream snapshot (e.g. a specific `vllm/vll
 Sometimes a fix lands in vLLM `main` before any release tag (or its image) exists. There is no `vllm/vllm-openai` image for an arbitrary commit — upstream prunes its per-commit `nightly-<sha>` images quickly — but the per-commit **wheel** stays available at `https://wheels.vllm.ai/<full-sha>/`. The bridge can overlay that pinned wheel onto the nearest released base via three build args:
 
 - `VLLM_WHEEL_URL` — the immutable per-commit wheel URL.
-- `VLLM_WHEEL_SHA256` — its checksum. Both must be set together; the build fails on a partial/unpinned config, same as the wireproxy gate. The wheel is installed `--no-deps`, so the base's compiled stack (torch, xformers) is left untouched.
+- `VLLM_WHEEL_SHA256` — its checksum. Both must be set together; the build fails on a partial/unpinned config — we never install an unpinned artifact. The wheel is installed `--no-deps`, so the base's compiled stack (torch, xformers) is left untouched.
 - `FLASHINFER_VERSION` — set to the commit's flashinfer pin (vLLM's `docker/Dockerfile` `ARG FLASHINFER_VERSION` / `versions.json`) so the jit-cache AOT kernels match.
 - `FLASHINFER_CUDA_INDEX` — only if the chosen base's torch carries a different `+cuXXX` build than the default (`cu130`); the jit-cache wheel index must match it.
 
