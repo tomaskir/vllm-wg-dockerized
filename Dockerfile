@@ -6,7 +6,7 @@
 # BASE_IMAGE selects the upstream vLLM runtime to extend:
 #   - CUDA: vllm/vllm-openai:vX.Y.Z              (pin to a semver tag)
 #   - ROCm: vllm/vllm-openai-rocm:vX.Y.Z         (pin to a semver tag)
-ARG BASE_IMAGE=vllm/vllm-openai:v0.30.0
+ARG BASE_IMAGE=vllm/vllm-openai:v0.31.0
 
 # --------------------------------------------------------------------
 # Stage 1: build wireproxy from a pinned upstream commit
@@ -42,7 +42,7 @@ RUN git init -q . \
 # Stage 2: final image extending vLLM.
 # ACCEL gates accelerator-specific installs (the CUDA-only flashinfer trio).
 # Two knobs make dev/unreleased vLLM builds first-class without editing this
-# file: FLASHINFER_VERSION (defaults to the v0.30.0 base's pin) and the
+# file: FLASHINFER_VERSION (defaults to the v0.31.0 base's pin) and the
 # VLLM_WHEEL_URL / VLLM_WHEEL_SHA256 pair, which overlays a pinned per-commit
 # wheel from wheels.vllm.ai over the base. See "Building against an unreleased
 # vLLM dev commit" in CLAUDE.md.
@@ -51,7 +51,7 @@ FROM ${BASE_IMAGE}
 
 ARG ACCEL=cuda
 # The flashinfer version for BOTH stable and dev-overlay CUDA builds. Default =
-# the v0.30.0 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
+# the v0.31.0 base's pin; it is NOT auto-derived from BASE_IMAGE. When bumping
 # the vLLM base for a release, re-check vLLM's flashinfer pin (its
 # docker/Dockerfile `ARG FLASHINFER_VERSION` / versions.json) and update this
 # default if it moved, or the trio drifts from the base (e.g. 0.22.0 -> 0.23.0
@@ -59,14 +59,15 @@ ARG ACCEL=cuda
 # 0.24.0 -> 0.25.1 moved it 0.6.12 -> 0.6.13; 0.25.1 -> 0.27.1 moved it
 # 0.6.13 -> 0.6.16.post3; 0.27.1 -> 0.28.0 left it at 0.6.16.post3;
 # 0.28.0 -> 0.29.0 moved it 0.6.16.post3 -> 0.6.18; 0.29.0 -> 0.30.0 moved it
-# 0.6.18 -> 0.6.18.post1). When overlaying a dev-commit wheel (VLLM_WHEEL_URL
+# 0.6.18 -> 0.6.18.post1; 0.30.0 -> 0.31.0 moved it 0.6.18.post1 ->
+# 0.7.0.post1). When overlaying a dev-commit wheel (VLLM_WHEEL_URL
 # below), pass the commit's pin as a build-arg instead. jit-cache AOT kernels
 # must match runtime.
-ARG FLASHINFER_VERSION=0.6.18.post1
+ARG FLASHINFER_VERSION=0.7.0.post1
 # Wheel index for flashinfer-jit-cache. The cuXXX suffix must match the base
 # torch's CUDA build (the +cuXXX in torch.__version__), which moves
 # independently of FLASHINFER_VERSION when the base bumps its CUDA toolchain —
-# re-check it on every vLLM base bump. Still cu130 at v0.30.0 (image config
+# re-check it on every vLLM base bump. Still cu130 at v0.31.0 (image config
 # CUDA_VERSION=13.0.2; upstream also publishes explicit -cu129 tag variants we
 # do NOT use).
 ARG FLASHINFER_CUDA_INDEX=cu130
@@ -107,7 +108,7 @@ RUN apt-get update \
 # or they drift. --no-deps is REQUIRED: a flashinfer version bump otherwise
 # re-resolves its dependency closure and drags in a conflicting torch (e.g. 0.6.12
 # pulls torch 2.9.1 + cuda-toolkit, clobbering the base's torch — 2.13.0+cu130 as
-# of the v0.30.0 base). We keep the base's torch and only swap the flashinfer
+# of the v0.31.0 base). We keep the base's torch and only swap the flashinfer
 # packages. Runs before the vLLM overlay so a --no-deps wheel install lands on
 # the intended flashinfer. The root flashinfer.ai index is an EXTRA index for
 # python/cubin because flashinfer-cubin left PyPI after 0.6.13 (upstream
@@ -123,7 +124,7 @@ RUN if [ "$ACCEL" = "cuda" ]; then \
 # MX-FP4 / Quark-quantized models without it ("The package `amd-quark` is required
 # to use MX-FP4 models."). Through v0.25.1 this repo installed it because the
 # published vllm-openai-rocm image did not bake it in — but as of the v0.27.x
-# base (still true at v0.30.0) upstream hard-pins `amd-quark==0.12.post1` in
+# base (still true at v0.31.0) upstream hard-pins `amd-quark==0.12.post1` in
 # requirements/rocm.txt, bakes it into the image (verified in the published
 # layers back to v0.25.1), and the ROCm-built vLLM wheel declares
 # `Requires-Dist: amd-quark==0.12.post1`. An install pin here would therefore
