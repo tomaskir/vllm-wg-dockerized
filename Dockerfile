@@ -142,8 +142,8 @@ RUN if [ "$ACCEL" = "rocm" ]; then \
 # which can upgrade base pins (transformers, numpy, ...). Gated with the same
 # scoped pip check as the dev-wheel overlay below so a resolve that breaks the
 # vLLM stack fails the build instead of drifting silently. Sits BEFORE the
-# overlay and the FLA patch — the two most frequently changing steps — so
-# changing those doesn't invalidate this heavy download layer.
+# overlay — the most frequently changing step — so changing it doesn't
+# invalidate this heavy download layer.
 RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor \
     && pc="$(pip check 2>&1 || true)" && echo "$pc" \
     && { echo "$pc" | grep -qiE '(torch|vllm|flashinfer|xformers)' \
@@ -182,39 +182,6 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
                 || true; } \
         && python -c "import importlib.metadata as m; print('vLLM pinned to', m.version('vllm'))"; \
     fi
-
-# vLLM source patch (BOTH streams): fix the torch.compile Dynamo break in vLLM's
-# vendored flash-linear-attention `input_guard` on torch 2.11. The vendored FLA
-# wraps ops with `torch.accelerator.device_index()`, whose __init__ is on torch
-# 2.11's Dynamo skiplist, so vLLM's AOT full-graph compile of GDN / linear-
-# attention backbones (Qwen3-Next, gated-delta-net, ...) crashes with "Attempted
-# to inline function marked as skipped". Cherry-pick of the still-open, conflict-
-# stalled upstream fix (vLLM PR #40921 / issue #40919): route the device guard
-# through torch.cuda.device(), which Dynamo CAN trace. Rebased for v0.26.0+'s
-# tree move (vllm/model_executor/layers/fla/ -> vllm/third_party/
-# flash_linear_attention/, vLLM PR #48500). torch itself fixed the root cause in
-# 2.13 (pytorch/pytorch#181540, fixed by #181846) — which the v0.30.0 CUDA base
-# ships — but the ROCm base still builds ROCm/pytorch release/2.12 (bumped from
-# release/2.11 at v0.28.0, upstream PR #50607; unchanged at 6bbd260 through
-# v0.30.0; the Dynamo fix is not in 2.12 —
-# `AcceleratorDeviceIndexVariable` appears only in 2.13), so the patch is still
-# REQUIRED there. Deliberately not ACCEL-gated: on torch 2.13 the patched branch
-# (torch.cuda.device) is equally traceable and semantically equivalent, so one
-# unconditional patch keeps the streams identical. Drop it when the ROCm base
-# moves to torch >= 2.13. Runs AFTER the optional dev-wheel
-# overlay so an overlaid vLLM is patched too. Plain `git apply` (no
-# --3way/--forward) makes the build FAIL LOUDLY if a future base refactors or
-# upstream-merges this — the signal to re-evaluate the patch on the next bump.
-COPY patches/vllm-fla-input-guard-dynamo.patch /tmp/vllm-fla-input-guard-dynamo.patch
-RUN sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm.__file__)))')" \
-    && git -C "$sp" apply --verbose -p1 /tmp/vllm-fla-input-guard-dynamo.patch \
-    && rm -f /tmp/vllm-fla-input-guard-dynamo.patch \
-    && python -m py_compile \
-        "$sp/vllm/platforms/interface.py" \
-        "$sp/vllm/third_party/flash_linear_attention/ops/utils.py" \
-    && grep -q 'get_device_context(tensor.device)' \
-        "$sp/vllm/third_party/flash_linear_attention/ops/utils.py" \
-    && echo "vLLM FLA input_guard torch.compile patch applied"
 
 # HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
 # huggingface_hub auto-installs the hf-xet backend. HF_XET_HIGH_PERFORMANCE is
