@@ -184,6 +184,31 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
         && python -c "import importlib.metadata as m; print('vLLM pinned to', m.version('vllm'))"; \
     fi
 
+# vLLM source patch (BOTH streams): backport of upstream c32513b99d (vLLM PR
+# #59431). v0.31.0's Qwen4Exp (Qwen3.8-Flash-Next) PLE n-gram embedding accepts
+# only unquantized / ModelOpt / Fp8Config checkpoints and raises
+# "Qwen4Exp PLE embedding does not support quantization config
+# CompressedTensorsConfig" on every compressed-tensors checkpoint — even when the
+# PLE table itself is left unquantized (BF16), as in the community NVFP4/W4A16
+# quants. The fix routes a PLE table that no CT scheme targets to the
+# unquantized method. It landed on main after the v0.31.0 branch cut; drop it
+# once a release contains c32513b99d. Runs AFTER the dev-wheel overlay so an
+# overlaid vLLM is patched too; an overlay that already contains the fix is
+# detected via a reverse-apply check and skipped. Otherwise plain `git apply`
+# (no --3way) fails the build loudly if the file moved or was refactored.
+COPY patches/vllm-qwen4exp-ple-compressed-tensors.patch /tmp/vllm-qwen4exp-ple-ct.patch
+RUN sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm.__file__)))')" \
+    && f="$sp/vllm/models/qwen4_exp/common/ngram_embedding.py" \
+    && if git -C "$sp" apply --reverse --check -p1 /tmp/vllm-qwen4exp-ple-ct.patch 2>/dev/null; then \
+           echo "vLLM already contains the Qwen4Exp PLE compressed-tensors fix; skipping patch"; \
+       else \
+           git -C "$sp" apply --verbose -p1 /tmp/vllm-qwen4exp-ple-ct.patch \
+           && echo "vLLM Qwen4Exp PLE compressed-tensors patch applied"; \
+       fi \
+    && rm -f /tmp/vllm-qwen4exp-ple-ct.patch \
+    && python -m py_compile "$f" \
+    && grep -q 'isinstance(quant_config, CompressedTensorsConfig)' "$f"
+
 # HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
 # huggingface_hub auto-installs the hf-xet backend. HF_XET_HIGH_PERFORMANCE is
 # the Xet equivalent of the old HF_HUB_ENABLE_HF_TRANSFER=1 fast-transfer flag.

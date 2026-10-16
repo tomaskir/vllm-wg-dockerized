@@ -1,0 +1,36 @@
+From c32513b99d29b3c6efee38df752a696bc2696c2f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Eldar=20Kurti=C4=87?=
+ <8884008+eldarkurtic@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 18:08:31 +0200
+Subject: [PATCH] Add support for unquantized ngram in CT format (#59431)
+
+---
+ vllm/models/qwen4_exp/common/ngram_embedding.py | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/vllm/models/qwen4_exp/common/ngram_embedding.py b/vllm/models/qwen4_exp/common/ngram_embedding.py
+index e7371770f8ad..9e6eef03df0d 100644
+--- a/vllm/models/qwen4_exp/common/ngram_embedding.py
++++ b/vllm/models/qwen4_exp/common/ngram_embedding.py
+@@ -23,6 +23,9 @@
+     QuantizationConfig,
+     QuantizeMethodBase,
+ )
++from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors import (  # noqa: E501
++    CompressedTensorsConfig,
++)
+ from vllm.model_executor.layers.quantization.fp8 import Fp8Config
+ from vllm.model_executor.layers.quantization.modelopt import (
+     ModelOptMixedPrecisionConfig,
+@@ -182,6 +185,11 @@ def from_quant_config(
+             quant_config, ModelOptQuantConfigBase
+         ) and quant_config.is_layer_excluded(prefix):
+             return Qwen4ExpPLEUnquantizedEmbeddingMethod()
++        if (
++            isinstance(quant_config, CompressedTensorsConfig)
++            and quant_config.get_scheme_dict(None, layer_name=prefix) is None
++        ):
++            return Qwen4ExpPLEUnquantizedEmbeddingMethod()
+         if not isinstance(quant_config, Fp8Config):
+             raise NotImplementedError(
+                 "Qwen4Exp PLE embedding does not support quantization config "
