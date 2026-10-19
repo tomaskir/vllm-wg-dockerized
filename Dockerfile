@@ -101,23 +101,30 @@ RUN apt-get update \
     # fresh per-container keys at startup.
     && rm -f /etc/ssh/ssh_host_*
 
-# flashinfer trio (CUDA only), wheel-published for CUDA only. python/cubin are
-# already base deps; jit-cache is the heavy ~1.8GB AOT-kernel add and is NOT a
-# default dep. Version is FLASHINFER_VERSION (above) so it can track a dev-commit
-# wheel's flashinfer pin; the jit-cache kernels must match the runtime flashinfer
-# or they drift. --no-deps is REQUIRED: a flashinfer version bump otherwise
+# flashinfer trio (CUDA only), wheel-published for CUDA only. The upstream CUDA
+# image already ships all three at the base's pin (since v0.32.0 via
+# `flashinfer download-kernels`, upstream PR #58765), so on release builds this
+# layer is a no-op that fails loudly if our pin ever drifts from the base. It
+# matters for dev-commit overlays, where FLASHINFER_VERSION tracks the commit's
+# pin; the jit-cache kernels must match the runtime flashinfer or they drift.
+# python/cubin: --no-deps is REQUIRED — a flashinfer version bump otherwise
 # re-resolves its dependency closure and drags in a conflicting torch (e.g. 0.6.12
 # pulls torch 2.9.1 + cuda-toolkit, clobbering the base's torch — 2.13.0+cu130 as
-# of the v0.31.0 base). We keep the base's torch and only swap the flashinfer
-# packages. Runs before the vLLM overlay so a --no-deps wheel install lands on
-# the intended flashinfer. The root flashinfer.ai index is an EXTRA index for
-# python/cubin because flashinfer-cubin left PyPI after 0.6.13 (upstream
-# requirements/cuda.txt carries the same --extra-index-url); the cuXXX subdir
-# index stays on the jit-cache line only.
+# of the v0.32.0 base). The root flashinfer.ai index is an EXTRA index because
+# flashinfer-cubin left PyPI after 0.6.13.
+# jit-cache: since 0.7.0, flashinfer-jit-cache is a ~5KB shim whose only
+# dependencies are the per-arch provider wheels (flashinfer-jit-cache-sm80,
+# -sm90a, -sm100a, ...) that hold the AOT kernels, each pinned to the shim's
+# exact version and dependency-free. It must therefore install WITH deps —
+# --no-deps would swap only the shim and leave mismatched providers that the
+# runtime rejects, silently falling back to JIT. This is safe without --no-deps
+# because --index-url confines resolution to the flashinfer cuXXX index, which
+# carries no torch. Runs before the vLLM overlay so a --no-deps wheel install
+# lands on the intended flashinfer.
 RUN if [ "$ACCEL" = "cuda" ]; then \
         pip install --no-cache-dir --no-deps flashinfer-python==${FLASHINFER_VERSION} flashinfer-cubin==${FLASHINFER_VERSION} \
             --extra-index-url https://flashinfer.ai/whl/ \
-        && pip install --no-cache-dir --no-deps flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/${FLASHINFER_CUDA_INDEX}; \
+        && pip install --no-cache-dir flashinfer-jit-cache==${FLASHINFER_VERSION} --index-url https://flashinfer.ai/whl/${FLASHINFER_CUDA_INDEX}; \
     fi
 
 # amd-quark (ROCm only): AMD's Quark quantization runtime. vLLM refuses to load
