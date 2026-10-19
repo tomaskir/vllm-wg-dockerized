@@ -40,6 +40,42 @@ jobs:
           base_image="vllm/vllm-openai:${vllm_version}"
           echo "base_image=${base_image}" >>"$GITHUB_OUTPUT"
           echo "Resolved base image: ${base_image}"
+          echo "vllm_version=${vllm_version}" >>"$GITHUB_OUTPUT"
+
+      # Each vendored vLLM patch names its upstream PR and issue in its header
+      # (Upstream-PR / Upstream-Issue). Annotate the run when the base release
+      # already contains the merged PR (drop the patch) or upstream moved on
+      # without it (re-check the backport). Warn-only: a GitHub API hiccup
+      # must not block a release, and the Dockerfile's apply step is the hard
+      # gate either way.
+      - name: Check vendored vLLM patches against upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VLLM_VERSION: ${{ steps.base.outputs.vllm_version }}
+        run: |
+          shopt -s nullglob
+          for p in patches/*.patch; do
+            pr="$(sed -n 's/^Upstream-PR: vllm-project\/vllm#\([0-9]*\)$/\1/p' "$p")"
+            issue="$(sed -n 's/^Upstream-Issue: vllm-project\/vllm#\([0-9]*\)$/\1/p' "$p")"
+            if [ -n "$pr" ]; then
+              read -r state merge_sha < <(gh api "repos/vllm-project/vllm/pulls/$pr" \
+                --jq '[(if .merged then "merged" else .state end), (.merge_commit_sha // "-")] | @tsv') \
+                || { echo "::warning file=$p::could not query vLLM PR #$pr"; continue; }
+              if [ "$state" = "merged" ]; then
+                status="$(gh api "repos/vllm-project/vllm/compare/${VLLM_VERSION}...${merge_sha}" --jq .status || echo unknown)"
+                if [ "$status" = "behind" ] || [ "$status" = "identical" ]; then
+                  echo "::warning file=$p::vLLM PR #$pr is in ${VLLM_VERSION}; delete this patch and its Dockerfile step"
+                else
+                  echo "::notice file=$p::vLLM PR #$pr is merged but not in ${VLLM_VERSION}; keep the patch until a release contains it"
+                fi
+              elif [ "$state" = "closed" ]; then
+                echo "::warning file=$p::vLLM PR #$pr was closed without merging; check issue #${issue:-?} for the fix that replaced it"
+              fi
+            fi
+            if [ -n "$issue" ] && [ "$(gh api "repos/vllm-project/vllm/issues/$issue" --jq .state || true)" = "closed" ]; then
+              echo "::notice file=$p::vLLM issue #$issue is closed; check whether ${VLLM_VERSION} contains the fix"
+            fi
+          done
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4

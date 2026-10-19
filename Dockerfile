@@ -192,6 +192,38 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
         && python -c "import importlib.metadata as m; print('vLLM pinned to', m.version('vllm'))"; \
     fi
 
+# vLLM source patch (CUDA only): backport of open upstream PR #62318 for issue
+# #62308. Since #59533 (v0.32.0) the NVIDIA Qwen4Exp (Qwen3.8-Flash-Next) model
+# lists the QSA indexer projection in packed_modules_mapping["qkv_proj"], so
+# checkpoints that quantize q/k/v but keep indexer.index_qk_proj in BF16 (many
+# community NVFP4/W4A16 quants) fail at load with "Found different quantization
+# schemes for the shards of ...self_attn.qkv_proj". The patch fuses the indexer
+# into qkv_proj only when both use the same quant method. ROCm dispatches
+# Qwen4Exp to vllm/models/qwen4_exp/amd/, which never fused the indexer, so the
+# ROCm stream is unaffected and skips this step. Drop it once a release used as
+# BASE_IMAGE contains the fix (see the patch header and CLAUDE.md). Runs AFTER
+# the dev-wheel overlay so an overlaid vLLM is patched too; an overlay that
+# already contains the fix is detected via a reverse-apply check and skipped.
+# Otherwise plain `git apply` (no --3way) fails the build loudly if the files
+# moved. The final grep asserts the root cause (the indexer in the qkv_proj
+# mapping) is gone, whichever way the fix arrived.
+COPY patches/vllm-qwen4exp-qsa-indexer-quant.patch /tmp/vllm-qwen4exp-qsa-indexer-quant.patch
+RUN if [ "$ACCEL" = "cuda" ]; then \
+        sp="$(python -c 'import os, vllm; print(os.path.dirname(os.path.dirname(vllm.__file__)))')" \
+        && d="$sp/vllm/models/qwen4_exp/nvidia" \
+        && if git -C "$sp" apply --reverse --check -p1 /tmp/vllm-qwen4exp-qsa-indexer-quant.patch 2>/dev/null; then \
+               echo "vLLM already contains the Qwen4Exp QSA indexer quantization fix; skipping patch"; \
+           else \
+               git -C "$sp" apply --verbose -p1 /tmp/vllm-qwen4exp-qsa-indexer-quant.patch \
+               && echo "vLLM Qwen4Exp QSA indexer quantization patch applied"; \
+           fi \
+        && python -m py_compile "$d/model.py" "$d/qsa.py" \
+        && if grep -qF '"v_proj", "indexer.index_qk_proj"' "$d/model.py"; then \
+               echo "ERROR: Qwen4Exp qkv_proj packed mapping still lists the QSA indexer (vLLM #62308)" >&2; exit 1; \
+           fi; \
+    fi \
+    && rm -f /tmp/vllm-qwen4exp-qsa-indexer-quant.patch
+
 # HF Hub is fully Xet-backed now: hf_transfer is deprecated and unused, and
 # huggingface_hub auto-installs the hf-xet backend. HF_XET_HIGH_PERFORMANCE is
 # the Xet equivalent of the old HF_HUB_ENABLE_HF_TRANSFER=1 fast-transfer flag.
