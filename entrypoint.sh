@@ -128,6 +128,42 @@ chmod 600 /root/.ssh/authorized_keys
 ssh-keygen -A >/dev/null
 
 # --------------------------------------------------------------------
+# GPU preflight: warn only, never exit — the manual-start workflow (no
+# VLLM_MODEL) must still come up, and these hosts may be fixable over SSH.
+# --------------------------------------------------------------------
+gpu_count=0
+if command -v nvidia-smi >/dev/null 2>&1 \
+        && driver="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1)" \
+        && [[ -n "$driver" ]]; then
+    gpu_count="$(nvidia-smi -L 2>/dev/null | grep -c '^GPU ' || true)"
+    # Minimum drivers: CUDA 13.x needs >= 580; CUDA 12.x runs on >= 525 via
+    # minor-version compatibility. Too old a driver otherwise surfaces only as
+    # an opaque CUDA init error deep inside vLLM.
+    cuda_major="${CUDA_VERSION:-}"; cuda_major="${cuda_major%%.*}"
+    min_driver=""
+    case "$cuda_major" in
+        13) min_driver=580 ;;
+        12) min_driver=525 ;;
+    esac
+    driver_major="${driver%%.*}"
+    if [[ -n "$min_driver" && "$driver_major" =~ ^[0-9]+$ ]] && (( driver_major < min_driver )) \
+            && [[ "${VLLM_ENABLE_CUDA_COMPATIBILITY:-0}" != 1 ]]; then
+        echo "WARNING: NVIDIA driver ${driver} is older than ${min_driver}, the minimum for this image's CUDA ${CUDA_VERSION}." >&2
+        echo "WARNING: on datacenter GPUs set VLLM_ENABLE_CUDA_COMPATIBILITY=1 (the image ships CUDA forward-compat libs); consumer GPUs need a newer host driver." >&2
+    fi
+elif [[ -e /dev/kfd ]]; then
+    gpu_count="$(find /dev/dri -maxdepth 1 -name 'renderD*' 2>/dev/null | wc -l || true)"
+fi
+
+# Docker's default /dev/shm is 64 MiB. vLLM's multi-GPU workers and NCCL use it
+# for intra-node transfers, and a tiny one crashes tensor-parallel runs with
+# bus errors.
+shm_kib="$(df -k --output=size /dev/shm 2>/dev/null | tail -n1 | tr -d ' ' || true)"
+if (( gpu_count > 1 )) && [[ "$shm_kib" =~ ^[0-9]+$ ]] && (( shm_kib < 1048576 )); then
+    echo "WARNING: /dev/shm is only $(( shm_kib / 1024 )) MiB with ${gpu_count} GPUs visible; multi-GPU vLLM needs more. Launch with --ipc=host or --shm-size=16g." >&2
+fi
+
+# --------------------------------------------------------------------
 # Process supervision: start wireproxy, sshd, and optionally vLLM.
 # Container exits as soon as any supervised process exits.
 # --------------------------------------------------------------------
