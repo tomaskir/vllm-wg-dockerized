@@ -103,6 +103,8 @@ All via environment variables. No config files, no CLI flags beyond what the ent
 | `VLLM_EXTRA_ARGS` | no | — | extra args passed verbatim to `vllm serve` (word-split) |
 | `HF_TOKEN` | no | — | HuggingFace token for **gated/private** model downloads (e.g. Llama). Operator-supplied at container start, never baked in; auto-consumed by vLLM/`huggingface_hub`. Not needed for public models. |
 
+Telemetry is off by default: the image sets `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1` and `HF_HUB_DISABLE_TELEMETRY=1`, so nothing reports to `stats.vllm.ai` or the HF Hub from inside the rental. Override any of them at container start to opt back in.
+
 If `VLLM_MODEL` is unset, only wireproxy + sshd run and vLLM must be started manually (e.g. via SSH) on `127.0.0.1:8000`.
 
 The env-var contract is the public API of this image. Renaming or removing a variable is a breaking change for any downstream provider templates that consume it.

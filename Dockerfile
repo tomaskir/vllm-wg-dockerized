@@ -197,6 +197,14 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
 # the Xet equivalent of the old HF_HUB_ENABLE_HF_TRANSFER=1 fast-transfer flag.
 ENV HF_XET_HIGH_PERFORMANCE=1
 
+# No phoning home from inside the rental: vLLM otherwise reports usage stats
+# (GPU type, model architecture, config) to stats.vllm.ai, and huggingface_hub
+# sends telemetry. Serving is unaffected; an operator can re-enable either by
+# overriding the var at container start.
+ENV VLLM_NO_USAGE_STATS=1 \
+    DO_NOT_TRACK=1 \
+    HF_HUB_DISABLE_TELEMETRY=1
+
 COPY --from=wireproxy-build /usr/local/bin/wireproxy /usr/local/bin/wireproxy
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
