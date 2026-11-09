@@ -1,11 +1,13 @@
-Backport of vLLM PR #62318 (head e5b2296947d5160cc3edcbb630abea2512be5e02)
-onto v0.32.0, source files only (the PR's unit test and Buildkite change are
-not part of the installed package and are left out).
+Backport of vLLM PR #62318 as merged (a91a1d06b72a53d6ba05840164b27a61e3b03d4e)
+onto v0.33.0, source files only (the PR's unit test is not part of the
+installed package and is left out). The merge landed on main after the
+releases/v0.33.0 branch was cut and was not cherry-picked, so v0.33.0 still
+ships the bug.
 
 Upstream-PR: vllm-project/vllm#62318
 Upstream-Issue: vllm-project/vllm#62308
 Remove-When: a vLLM release used as BASE_IMAGE contains the merged fix for
-  #62308 (PR #62318 or whatever replaces it). Not before: a merged PR that
+  #62308 (PR #62318, merge commit a91a1d06b7). Not before: a merged PR that
   is not yet in a release tag still needs this patch.
 
 [Bugfix][Model] Qwen3.8-Flash-Next: load checkpoints with quantized q/k/v and
@@ -22,19 +24,21 @@ checkpoints that quantize q/k/v but keep the indexer in BF16 fail with:
   use the same scheme.
 
 Keep the indexer out of the mapping the quant config sees, and fuse it into
-qkv_proj only when both resolve to the same quant method and scheme.
+qkv_proj only when both resolve to the same quant method.
 
-Rebased by 3-way cherry-pick: the qsa.py hunk's context moved on main
-(#60602 extended the use_fused_qsa_prepare condition just above it); the
-changed lines are identical to the PR's.
+Re-vendored for v0.33.0 by a clean 3-way cherry-pick of the merge commit:
+the qsa.py hunk's context moved (#60602, #52670). The previous vendored copy
+was the PR's pre-merge head e5b2296, which also compared the
+compressed-tensors scheme; the merged version compares the quant method type
+only.
 
 Original-Author: Seungryong Kim <137975233+srkim-business@users.noreply.github.com>
 
 diff --git a/vllm/models/qwen4_exp/nvidia/model.py b/vllm/models/qwen4_exp/nvidia/model.py
-index 2fb056bde..fea06a1f3 100644
+index a5afd6bc8..333490f2a 100644
 --- a/vllm/models/qwen4_exp/nvidia/model.py
 +++ b/vllm/models/qwen4_exp/nvidia/model.py
-@@ -700,8 +700,11 @@ class Qwen4ExpForCausalLM(
+@@ -693,8 +693,11 @@ class Qwen4ExpForCausalLM(
      Qwen4ExpMixtureOfExperts,
      IsHybrid,
  ):
@@ -47,7 +51,7 @@ index 2fb056bde..fea06a1f3 100644
          "gate_up_proj": ["gate_proj", "up_proj"],
          "kv_proj": ["key_proj", "value_proj"],
          "in_proj_qkvz": ["in_proj_qkv", "in_proj_z"],
-@@ -720,12 +723,6 @@ class Qwen4ExpForCausalLM(
+@@ -713,12 +716,6 @@ class Qwen4ExpForCausalLM(
      def __init__(self, *, vllm_config: VllmConfig, prefix: str = "") -> None:
          super().__init__()
          config: Qwen4ExpTextConfig = vllm_config.model_config.hf_text_config
@@ -60,7 +64,7 @@ index 2fb056bde..fea06a1f3 100644
          self.vllm_config = vllm_config
          self.model_config = vllm_config.model_config
          self.quant_config = vllm_config.quant_config
-@@ -970,12 +967,6 @@ class Qwen4ExpForConditionalGeneration(
+@@ -963,12 +960,6 @@ class Qwen4ExpForConditionalGeneration(
      def __init__(self, *, vllm_config: VllmConfig, prefix: str = "model") -> None:
          nn.Module.__init__(self)
          config: Qwen4ExpConfig = vllm_config.model_config.hf_config
@@ -74,48 +78,22 @@ index 2fb056bde..fea06a1f3 100644
          multimodal_config = vllm_config.model_config.multimodal_config
          if multimodal_config is None:
 diff --git a/vllm/models/qwen4_exp/nvidia/qsa.py b/vllm/models/qwen4_exp/nvidia/qsa.py
-index 9f0934d5a..a582638e5 100644
+index f82cca1c2..31cac7e2b 100644
 --- a/vllm/models/qwen4_exp/nvidia/qsa.py
 +++ b/vllm/models/qwen4_exp/nvidia/qsa.py
-@@ -22,6 +22,7 @@ from vllm.model_executor.layers.attention.attention import (
- from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
- from vllm.model_executor.layers.layernorm import GemmaRMSNorm
- from vllm.model_executor.layers.linear import (
-+    LinearBase,
-     MergedColumnParallelLinear,
-     QKVParallelLinear,
-     RowParallelLinear,
-@@ -64,6 +65,19 @@ from . import model
- from .indexer_qsa import QSAIndexer
- 
- 
-+def _same_quant_method(qkv_proj: LinearBase, index_qk_proj: LinearBase) -> bool:
-+    """Whether the indexer can share the q/k/v GEMM, which uses the q/k/v quant
-+    method and scheme."""
-+
-+    def kind(layer: LinearBase) -> tuple[type, type]:
-+        method = layer.quant_method
-+        # compressed-tensors keeps the scheme on the layer, INC on the method.
-+        scheme = getattr(layer, "scheme", None) or getattr(method, "scheme", None)
-+        return type(method), type(scheme)
-+
-+    return kind(qkv_proj) == kind(index_qk_proj)
-+
-+
- class Qwen4ExpQSAQKVIndexerLinear(MergedColumnParallelLinear):
-     """Pack sharded Q/gate, K, V and replicated indexer Q/K in one GEMM."""
- 
-@@ -496,13 +510,19 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
-         self.use_fused_qsa_prepare = (
-             self.use_fused_qk_norm_rope_gate and self.indexer.use_fused_pre_indexer
+@@ -505,13 +505,21 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
+                 or current_platform.has_device_capability(89)
+             )
          )
 -        self.fuse_indexer_projection = vllm_config.lora_config is None
 +        # Without a quant config here (BF16, or ModelOpt FP4, which keeps
-+        # attention in BF16) the fused layer is unquantized.
++        # attention in BF16) the fused layer is unquantized. Otherwise the
++        # indexer shares the q/k/v GEMM only if it uses the same quant method.
 +        fused_quant_config = model.without_modelopt_fp4(quant_config)
++        projection_method = type(self.qkv_proj.quant_method)
 +        self.fuse_indexer_projection = vllm_config.lora_config is None and (
 +            fused_quant_config is None
-+            or _same_quant_method(self.qkv_proj, self.indexer.index_qk_proj)
++            or projection_method is type(self.indexer.index_qk_proj.quant_method)
 +        )
          if self.fuse_indexer_projection:
              self.index_qk_size = self.indexer.index_qk_proj.output_size
