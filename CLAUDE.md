@@ -64,7 +64,7 @@ Single container, three supervised processes (vLLM optional):
 - One `[TCPServerTunnel]` block is rendered per port in `LISTEN_PORTS`; each accepts inbound TCP at `WG_ADDRESS:<port>` and proxies to `127.0.0.1:<port>`.
 - sshd binds `0.0.0.0:22` separately from wireproxy — that's the deliberate escape hatch via the platform's port-mapping. The operator may also include `22` in `LISTEN_PORTS` to make SSH reachable over WG.
 
-The image also bundles eval tooling (`lm_eval`, `inspect_ai`, `inspect_evals`, `instanttensor`) so the operator can benchmark the served model from inside the rental (typically over SSH). These install with their dependency trees — the only layer that does — so the Dockerfile gates the install with a scoped `pip check` that fails the build if the resolve disturbs the vLLM stack (torch/vllm/flashinfer/xformers).
+The image also bundles eval tooling (`lm_eval`, `inspect_ai`, `inspect_evals`, `instanttensor`) so the operator can benchmark the served model from inside the rental (typically over SSH). These install with their dependency trees — the only layer that does — so the Dockerfile pins every installed vLLM-stack package (torch/triton/vllm/flashinfer/xformers/`nvidia-*`/`cuda-*`/aiter/amd-quark/ROCm runtime) as a pip constraint and fails the build if the install moves one of them or adds a vLLM-stack `pip check` conflict. The check is relative to the base's own `pip check`, because the upstream base is not clean: the CUDA image deliberately overrides torch's NCCL pin (torch 2.14.0 pins `nvidia-nccl-cu13==2.30.7`, the image ships 2.31.2 for DeepEP over EFA), and v0.34.0's LMCache install leaves OpenTelemetry below vLLM's own `>=1.45.1` floor (vllm-project/vllm#67259, fix PR #67274). Without the constraints, pip "repairs" NCCL back to torch's pin. The same step re-resolves any vLLM requirement the base leaves unmet, which upgrades OpenTelemetry today and does nothing once upstream ships the fix; LMCache's OTel caps then stay as accepted unmet lines, as in upstream CI. `instanttensor` is really a vLLM load-format plugin the CUDA base already ships (`requirements/cuda.txt`), so it is installed only where missing (ROCm). Naming it again would pull torch back into the resolve.
 
 ## Configuration
 
@@ -166,7 +166,7 @@ Sometimes a fix lands in vLLM `main` before any release tag (or its image) exist
 - `torch`/`torchvision`/`torchaudio` in `requirements/cuda.txt` **must be unchanged** (a `--no-deps` overlay keeps the base's torch). If they moved, do **not** overlay — build vLLM's official `vllm-openai` image at the commit instead (`git checkout <sha>`, `docker build -f docker/Dockerfile --target vllm-openai --build-arg VLLM_USE_PRECOMPILED=1 …`) and point `BASE_IMAGE` at that.
 - `flashinfer` pin — set `FLASHINFER_VERSION` to match it.
 
-The build runs `pip check` after the overlay; a failure means the dev commit pulled deps the base can't satisfy (i.e. the overlay isn't coherent) — fall back to the from-source base above.
+The build runs `pip check` after the overlay and fails on vLLM-stack conflicts the overlay adds relative to the pre-overlay state; a failure means the dev commit pulled deps the base can't satisfy (i.e. the overlay isn't coherent) — fall back to the from-source base above.
 
 This is a **local/manual build only** — CI builds from release tags. Mirror the result to your registry and pin downstream by `@sha256:` digest; the upstream wheel will eventually be pruned too. Tag it so it reads as a dev build, not a release (don't reuse the `cuda-vX.Y.Z-N` scheme).
 

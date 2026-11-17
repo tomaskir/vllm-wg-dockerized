@@ -150,17 +150,48 @@ RUN if [ "$ACCEL" = "rocm" ]; then \
     fi
 
 # Eval tooling (both streams): benchmark the served model from inside the
-# rental. Unlike flashinfer these install WITH deps so their trees resolve —
-# which can upgrade base pins (transformers, numpy, ...). Gated with the same
-# scoped pip check as the dev-wheel overlay below so a resolve that breaks the
-# vLLM stack fails the build instead of drifting silently. Sits BEFORE the
-# overlay — the most frequently changing step — so changing it doesn't
-# invalidate this heavy download layer.
-RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals instanttensor \
-    && pc="$(pip check 2>&1 || true)" && echo "$pc" \
-    && { echo "$pc" | grep -qiE '(torch|vllm|flashinfer|xformers)' \
-            && { echo "ERROR: pip check flagged a conflict in the vLLM stack (above)"; exit 1; } \
-            || true; }
+# rental. Unlike flashinfer these install WITH deps so their trees resolve.
+# The upstream base itself is not pip-check clean: CUDA deliberately overrides
+# torch's NCCL pin via UV_OVERRIDE (torch 2.14.0 pins nvidia-nccl-cu13 2.30.7,
+# the image ships 2.31.2), and v0.34.0's LMCache install leaves OpenTelemetry
+# below vLLM's own floor (vllm-project/vllm#67259, fix PR #67274). So the gate
+# is baseline-relative: every installed vLLM-stack dist becomes a pip
+# constraint (pip has no uv-style override, so this is what keeps pip from
+# "repairing" NCCL back to torch's pin), and only stack conflicts the install
+# ADDS fail the build, plus a diff of the stack itself. instanttensor is a
+# vLLM load-format plugin the CUDA base already ships (requirements/cuda.txt);
+# naming it again drags torch into the resolve, so it is installed only where
+# missing (ROCm). vLLM requirements the base leaves unmet are re-resolved here
+# (a no-op once upstream ships #67274); LMCache's OTel caps then remain as
+# accepted unmet lines, as in upstream CI. set -f: the unmet specifiers are
+# expanded unquoted and may contain globs (e.g. protobuf's !=6.30.*). Sits
+# BEFORE the overlay — the most frequently changing step — so changing that
+# doesn't invalidate this heavy download layer.
+RUN set -ef; \
+    stack='(torch|pytorch[-_]triton|triton|vllm|flashinfer|xformers|nvidia[-_]|cuda[-_]|aiter|amd[-_]quark|rocm)'; \
+    norm() { sed -E 's/^([^ ]+) [^ ]+ has requirement/\1 has requirement/' | sort; }; \
+    pip list --format=freeze | grep -iE "^$stack" > /tmp/stack.txt; \
+    pip check 2>&1 | norm > /tmp/check.before; \
+    unmet="$(python -c "import importlib.metadata as md; \
+        from packaging.requirements import Requirement as R; \
+        from packaging.utils import canonicalize_name as cn; \
+        have = {cn(d.metadata['Name']): d.version for d in md.distributions() if d.metadata['Name']}; \
+        print(' '.join(r.name + str(r.specifier) for r in map(R, md.requires('vllm') or []) \
+            if (r.marker is None or r.marker.evaluate({'extra': ''})) \
+            and not (cn(r.name) in have and r.specifier.contains(have[cn(r.name)], prereleases=True))))")"; \
+    extra=""; \
+    pip show -q instanttensor 2>/dev/null || extra="instanttensor"; \
+    if pip show -q opentelemetry-exporter-prometheus 2>/dev/null; then extra="$extra opentelemetry-exporter-prometheus"; fi; \
+    echo "Re-resolving unmet vLLM requirements: ${unmet:-none}"; \
+    pip install --no-cache-dir -c /tmp/stack.txt $unmet $extra lm_eval 'lm_eval[api]' inspect_ai inspect_evals; \
+    pc="$(pip check 2>&1 || true)"; echo "$pc"; \
+    new="$(echo "$pc" | norm | comm -13 /tmp/check.before -)"; \
+    if echo "$new" | grep -iE "$stack"; then \
+        echo "ERROR: the eval install added the vLLM-stack conflicts above" >&2; exit 1; \
+    fi; \
+    pip list --format=freeze | grep -iE "^$stack" | diff /tmp/stack.txt - \
+        || { echo "ERROR: the eval install moved a vLLM-stack package (diff above)" >&2; exit 1; }; \
+    rm -f /tmp/stack.txt /tmp/check.before
 
 # Optional: pin vLLM to a specific upstream dev commit that has no released
 # image yet (e.g. a fix that landed after the last vLLM tag). Point
@@ -174,9 +205,10 @@ RUN pip install --no-cache-dir lm_eval 'lm_eval[api]' inspect_ai inspect_evals i
 # The wheel is saved under its REAL filename (decoding %2B -> +): pip derives the
 # package/version from the filename, so a generic /tmp/vllm.whl is rejected as a
 # malformed wheel name. The post-install gate runs `pip check` but only fails on
-# conflicts naming the vLLM stack (torch/vllm/flashinfer/xformers) — the base
-# image carries unrelated pre-existing pip-check warts (e.g. pygobject/pycairo)
-# we must not trip over.
+# vLLM-stack conflicts the overlay ADDS relative to the pre-install `pip check`
+# — the base itself is not pip-check clean (see the eval step above). Versions
+# on the left of "has requirement" are stripped before comparing, so the
+# overlaid vLLM's new version alone doesn't count as a new conflict.
 ARG VLLM_WHEEL_URL=""
 ARG VLLM_WHEEL_SHA256=""
 RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
@@ -186,11 +218,15 @@ RUN if [ -n "${VLLM_WHEEL_URL}${VLLM_WHEEL_SHA256}" ]; then \
         whl="/tmp/$(basename "$VLLM_WHEEL_URL" | sed 's/%2[bB]/+/g')" \
         && curl -fSL -o "$whl" "$VLLM_WHEEL_URL" \
         && echo "${VLLM_WHEEL_SHA256}  ${whl}" | sha256sum -c - \
+        && stack='(torch|pytorch[-_]triton|triton|vllm|flashinfer|xformers|nvidia[-_]|cuda[-_]|aiter|amd[-_]quark|rocm)' \
+        && pip check 2>&1 | sed -E 's/^([^ ]+) [^ ]+ has requirement/\1 has requirement/' | sort > /tmp/check.before \
         && pip install --no-cache-dir --no-deps "$whl" \
         && rm -f "$whl" \
         && pc="$(pip check 2>&1 || true)" && echo "$pc" \
-        && { echo "$pc" | grep -qiE '(torch|vllm|flashinfer|xformers)' \
-                && { echo "ERROR: pip check flagged a conflict in the vLLM stack (above)"; exit 1; } \
+        && new="$(echo "$pc" | sed -E 's/^([^ ]+) [^ ]+ has requirement/\1 has requirement/' | sort | comm -13 /tmp/check.before -)" \
+        && rm -f /tmp/check.before \
+        && { echo "$new" | grep -iE "$stack" \
+                && { echo "ERROR: the vLLM overlay added the vLLM-stack conflicts above" >&2; exit 1; } \
                 || true; } \
         && python -c "import importlib.metadata as m; print('vLLM pinned to', m.version('vllm'))"; \
     fi
