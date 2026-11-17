@@ -21,7 +21,7 @@ ARG BASE_IMAGE=vllm/vllm-openai:v0.33.0
 # digest, the source by full commit SHA (content-addressed — the checkout is
 # verified against it), and every Go module by the repo's go.sum. Go back to
 # the release-tarball + sha256 fetch once a release containing both fixes ships.
-FROM golang:1.26.10-bookworm@sha256:5de7c99eb78ca5e515a4c340235d0955ec5964a5071c492c15503d7c267da473 AS wireproxy-build
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS wireproxy-build
 
 ARG WIREPROXY_COMMIT=a4c5269015608fd202b61c746429ce9c278ae69e
 # Reported by `wireproxy -v`; git-describe form of WIREPROXY_COMMIT.
